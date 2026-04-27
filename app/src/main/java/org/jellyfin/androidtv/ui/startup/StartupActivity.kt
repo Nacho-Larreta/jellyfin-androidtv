@@ -26,6 +26,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.jellyfin.androidtv.JellyfinApplication
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.auth.repository.ProfileSelectorRepository
+import org.jellyfin.androidtv.auth.repository.ProfileSelectorStartupAction
 import org.jellyfin.androidtv.auth.repository.SessionRepository
 import org.jellyfin.androidtv.auth.repository.SessionRepositoryState
 import org.jellyfin.androidtv.auth.repository.UserRepository
@@ -37,6 +39,7 @@ import org.jellyfin.androidtv.ui.navigation.Destinations
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository
 import org.jellyfin.androidtv.ui.playback.MediaManager
 import org.jellyfin.androidtv.ui.startup.fragment.SelectServerFragment
+import org.jellyfin.androidtv.ui.startup.fragment.ProfileSelectorFragment
 import org.jellyfin.androidtv.ui.startup.fragment.ServerFragment
 import org.jellyfin.androidtv.ui.startup.fragment.SplashFragment
 import org.jellyfin.androidtv.ui.startup.fragment.StartupToolbarFragment
@@ -54,17 +57,20 @@ class StartupActivity : FragmentActivity() {
 		const val EXTRA_ITEM_ID = "ItemId"
 		const val EXTRA_ITEM_IS_USER_VIEW = "ItemIsUserView"
 		const val EXTRA_HIDE_SPLASH = "HideSplash"
+		const val EXTRA_OPEN_PROFILE_SELECTOR = "OpenProfileSelector"
 	}
 
 	private val startupViewModel: StartupViewModel by viewModel()
 	private val api: ApiClient by inject()
 	private val mediaManager: MediaManager by inject()
+	private val profileSelectorRepository: ProfileSelectorRepository by inject()
 	private val sessionRepository: SessionRepository by inject()
 	private val userRepository: UserRepository by inject()
 	private val navigationRepository: NavigationRepository by inject()
 	private val itemLauncher: ItemLauncher by inject()
 
 	private lateinit var binding: ActivityStartupBinding
+	private val shouldOpenProfileSelector get() = intent.getBooleanExtra(EXTRA_OPEN_PROFILE_SELECTOR, false)
 
 	private val networkPermissionsRequester = registerForActivityResult(
 		ActivityResultContracts.RequestMultiplePermissions()
@@ -109,15 +115,40 @@ class StartupActivity : FragmentActivity() {
 		.distinctUntilChanged()
 		.onEach { session ->
 			if (session != null) {
-				Timber.i("Found a session in the session repository, waiting for the currentUser in the application class.")
+				when (val action = withContext(Dispatchers.IO) {
+					profileSelectorRepository.resolveStartupAction(
+						session = session,
+						forceSelector = shouldOpenProfileSelector,
+					)
+				}) {
+					ProfileSelectorStartupAction.ContinueToApp -> {
+						if (shouldOpenProfileSelector) {
+							Timber.i("Profile switch finished, returning to the existing MainActivity.")
+							navigationRepository.reset(clearHistory = true)
+							finishAfterTransition()
+							return@onEach
+						}
 
-				showSplash()
+						Timber.i("Found a ready runtime session, waiting for currentUser before opening the app.")
+						showSplash()
 
-				val currentUser = userRepository.currentUser.first { it != null }
-				Timber.i("CurrentUser changed to ${currentUser?.id} while waiting for startup.")
+						val currentUser = userRepository.currentUser.first { it != null }
+						Timber.i("CurrentUser changed to ${currentUser?.id} while waiting for startup.")
 
-				lifecycleScope.launch {
-					openNextActivity()
+						lifecycleScope.launch {
+							openNextActivity()
+						}
+					}
+
+					is ProfileSelectorStartupAction.ShowSelector -> {
+						Timber.i("Opening profile selector for owner %s", action.selector.ownerUserId)
+						showProfileSelector()
+					}
+
+					is ProfileSelectorStartupAction.SwitchSession -> {
+						Timber.i("Auto-activating remembered profile %s", action.session.userId)
+						sessionRepository.switchCurrentSession(action.session)
+					}
 				}
 			} else {
 				// Clear audio queue in case left over from last run
@@ -194,6 +225,11 @@ class StartupActivity : FragmentActivity() {
 	private fun showServerSelection() = supportFragmentManager.commit {
 		replace<StartupToolbarFragment>(R.id.content_view)
 		add<SelectServerFragment>(R.id.content_view)
+	}
+
+	private fun showProfileSelector() = supportFragmentManager.commit {
+		replace<StartupToolbarFragment>(R.id.content_view)
+		add<ProfileSelectorFragment>(R.id.content_view)
 	}
 
 	override fun onNewIntent(intent: Intent) {

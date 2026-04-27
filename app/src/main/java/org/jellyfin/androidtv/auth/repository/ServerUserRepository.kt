@@ -31,6 +31,11 @@ class ServerUserRepositoryImpl(
 ) : ServerUserRepository {
 	override fun getStoredServerUsers(server: Server) = authenticationStore.getUsers(server.id)
 		?.mapNotNull { (userId, userInfo) ->
+			val ownerUserId = userInfo.profileSelectorOwnerUserId
+			if (ownerUserId != null && ownerUserId != userId) {
+				return@mapNotNull null
+			}
+
 			val authInfo = authenticationStore.getUser(server.id, userId)
 			PrivateUser(
 				id = userId,

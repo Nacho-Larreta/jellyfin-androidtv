@@ -23,6 +23,7 @@ class AuthenticationPreferences(context: Context) : SharedPreferenceStore(
 		// Persistent state
 		val lastServerId = stringPreference("last_server_id", "")
 		val lastUserId = stringPreference("last_user_id", "")
+		val lastOwnerUserId = stringPreference("last_owner_user_id", "")
 	}
 
 	init {
@@ -37,6 +38,7 @@ class AuthenticationPreferences(context: Context) : SharedPreferenceStore(
 				}
 
 				putString("last_user_id", "")
+				putString("last_owner_user_id", "")
 			}
 		}
 	}

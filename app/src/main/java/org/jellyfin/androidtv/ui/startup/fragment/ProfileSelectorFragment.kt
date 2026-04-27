@@ -1,0 +1,245 @@
+package org.jellyfin.androidtv.ui.startup.fragment
+
+import android.os.Bundle
+import android.text.InputFilter
+import android.text.InputType
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.view.WindowManager
+import android.widget.EditText
+import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
+import androidx.core.view.isVisible
+import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.RecyclerView
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.auth.model.ProfileSelector
+import org.jellyfin.androidtv.auth.model.ProfileSelectorUser
+import org.jellyfin.androidtv.auth.repository.ProfileSelectorApiException
+import org.jellyfin.androidtv.auth.repository.ProfileSelectorRepository
+import org.jellyfin.androidtv.auth.repository.ServerRepository
+import org.jellyfin.androidtv.auth.repository.Session
+import org.jellyfin.androidtv.auth.repository.SessionRepository
+import org.jellyfin.androidtv.databinding.FragmentProfileSelectorBinding
+import org.jellyfin.androidtv.ui.card.UserCardView
+import org.jellyfin.androidtv.ui.startup.StartupActivity
+import org.jellyfin.androidtv.ui.startup.StartupViewModel
+import org.jellyfin.androidtv.util.ListAdapter
+import org.koin.android.ext.android.inject
+import org.koin.androidx.viewmodel.ext.android.activityViewModel
+
+class ProfileSelectorFragment : Fragment() {
+	private val profileSelectorRepository: ProfileSelectorRepository by inject()
+	private val serverRepository: ServerRepository by inject()
+	private val sessionRepository: SessionRepository by inject()
+	private val startupViewModel: StartupViewModel by activityViewModel()
+
+	private var _binding: FragmentProfileSelectorBinding? = null
+	private val binding get() = _binding!!
+
+	private val profileAdapter by lazy {
+		ProfileAdapter(
+			startupViewModel = startupViewModel,
+			serverRepository = serverRepository,
+		).apply {
+			onItemPressed = ::onProfilePressed
+		}
+	}
+
+	private val isInRuntimeSwitchMode: Boolean
+		get() = requireActivity().intent.getBooleanExtra(StartupActivity.EXTRA_OPEN_PROFILE_SELECTOR, false)
+
+	override fun onCreateView(
+		inflater: LayoutInflater,
+		container: ViewGroup?,
+		savedInstanceState: Bundle?,
+	): View {
+		_binding = FragmentProfileSelectorBinding.inflate(inflater, container, false)
+
+		binding.users.adapter = profileAdapter
+		binding.cancelButton.isVisible = isInRuntimeSwitchMode
+		binding.cancelButton.setOnClickListener { requireActivity().finishAfterTransition() }
+		binding.signOutButton.setOnClickListener {
+			sessionRepository.currentSession.value?.let(profileSelectorRepository::signOut)
+			sessionRepository.destroyCurrentSession()
+		}
+
+		return binding.root
+	}
+
+	override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+		super.onViewCreated(view, savedInstanceState)
+		loadSelector()
+	}
+
+	override fun onDestroyView() {
+		super.onDestroyView()
+		_binding = null
+	}
+
+	private fun loadSelector() {
+		val session = sessionRepository.currentSession.value ?: run {
+			requireActivity().finishAfterTransition()
+			return
+		}
+
+		binding.message.setText(R.string.loading)
+
+		lifecycleScope.launch {
+			val selector = try {
+				withContext(Dispatchers.IO) {
+					profileSelectorRepository.getCurrentSelector(session)
+				}
+			} catch (error: ProfileSelectorApiException) {
+				binding.message.text = error.message
+				Toast.makeText(context, error.message, Toast.LENGTH_LONG).show()
+				return@launch
+			}
+
+			if (!isAdded) {
+				return@launch
+			}
+
+			if (selector == null) {
+				requireActivity().finishAfterTransition()
+				return@launch
+			}
+
+			renderSelector(selector)
+		}
+	}
+
+	private fun renderSelector(selector: ProfileSelector) {
+		val session = sessionRepository.currentSession.value
+		val server = session?.let { serverRepository.currentServer.value ?: startupViewModel.getServer(it.serverId) }
+		binding.subtitle.text = getString(R.string.login_connect_to, server?.name ?: selector.ownerUserName ?: "Jellyfin")
+		binding.message.setText(R.string.profile_selector_choose_profile)
+		binding.noUsersWarning.isVisible = selector.profiles.isEmpty()
+		profileAdapter.items = selector.profiles
+		binding.users.isFocusable = selector.profiles.any()
+		if (selector.profiles.any()) {
+			binding.users.requestFocus()
+		}
+	}
+
+	private fun onProfilePressed(profile: ProfileSelectorUser) {
+		val session = sessionRepository.currentSession.value ?: return
+
+		if (profile.isDisabled) {
+			Toast.makeText(context, R.string.profile_selector_profile_disabled, Toast.LENGTH_LONG).show()
+			return
+		}
+
+		if (profile.id == session.userId && session.isActiveProfileSession()) {
+			requireActivity().finishAfterTransition()
+			return
+		}
+
+		if (profile.requiresPin) {
+			showPinPrompt(profile)
+			return
+		}
+
+		activateProfile(profile, null)
+	}
+
+	private fun showPinPrompt(profile: ProfileSelectorUser, errorMessage: String? = null) {
+		val pinInput = EditText(requireContext()).apply {
+			filters = arrayOf(InputFilter.LengthFilter(6))
+			hint = getString(R.string.profile_selector_pin_hint)
+			imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE
+			inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+		}
+
+		val dialog = AlertDialog.Builder(requireContext())
+			.setTitle(getString(R.string.profile_selector_pin_title, profile.name))
+			.setMessage(errorMessage ?: getString(R.string.profile_selector_pin_message))
+			.setView(pinInput)
+			.setPositiveButton(R.string.lbl_ok) { _, _ ->
+				activateProfile(profile, pinInput.text?.toString().orEmpty())
+			}
+			.setNegativeButton(R.string.btn_cancel, null)
+			.create()
+
+		dialog.setOnShowListener {
+			pinInput.requestFocus()
+			dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
+		}
+		dialog.show()
+	}
+
+	private fun activateProfile(profile: ProfileSelectorUser, pin: String?) {
+		val session = sessionRepository.currentSession.value ?: return
+		binding.message.setText(R.string.login_authenticating)
+
+		lifecycleScope.launch {
+			try {
+				val activeSession = withContext(Dispatchers.IO) {
+					profileSelectorRepository.activateProfile(session, profile.id, pin)
+				}
+				sessionRepository.switchCurrentSession(activeSession)
+			} catch (error: ProfileSelectorApiException) {
+				handleProfileSelectorError(profile, error)
+			}
+		}
+	}
+
+	private fun handleProfileSelectorError(profile: ProfileSelectorUser, error: ProfileSelectorApiException) {
+		when (error.code) {
+			"PROFILE_PIN_REQUIRED" -> showPinPrompt(profile)
+			"PROFILE_PIN_INVALID" -> showPinPrompt(profile, getString(R.string.profile_selector_pin_invalid))
+			"PROFILE_PIN_LOCKED" -> {
+				binding.message.setText(R.string.profile_selector_pin_locked)
+				Toast.makeText(context, R.string.profile_selector_pin_locked, Toast.LENGTH_LONG).show()
+			}
+
+			else -> {
+				binding.message.text = error.message
+				Toast.makeText(context, error.message, Toast.LENGTH_LONG).show()
+			}
+		}
+	}
+
+	private fun Session?.isActiveProfileSession(): Boolean {
+		val currentSession = this ?: return false
+		return currentSession.ownerUserId != null && currentSession.ownerUserId != currentSession.userId
+	}
+
+	private class ProfileAdapter(
+		private val startupViewModel: StartupViewModel,
+		private val serverRepository: ServerRepository,
+	) : ListAdapter<ProfileSelectorUser, ProfileAdapter.ViewHolder>() {
+		var onItemPressed: (ProfileSelectorUser) -> Unit = {}
+
+		override fun areItemsTheSame(old: ProfileSelectorUser, new: ProfileSelectorUser): Boolean = old.id == new.id
+
+		override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder =
+			ViewHolder(UserCardView(parent.context))
+
+		override fun onBindViewHolder(holder: ViewHolder, item: ProfileSelectorUser) {
+			val server = serverRepository.currentServer.value ?: startupViewModel.getServer(item.serverId)
+
+			holder.cardView.name = item.name
+			holder.cardView.image = server?.let { startupViewModel.getUserImage(it, item) }
+			holder.cardView.badgeText = when {
+				item.requiresPin -> holder.cardView.context.getString(R.string.profile_selector_pin_badge)
+				item.hasParentalRestrictions -> holder.cardView.context.getString(R.string.lbl_kids).uppercase()
+				else -> null
+			}
+			holder.cardView.activeIndicator = item.isActive
+			holder.cardView.alpha = if (item.isDisabled) 0.5f else 1f
+			holder.cardView.setOnClickListener {
+				onItemPressed(item)
+			}
+		}
+
+		private class ViewHolder(
+			val cardView: UserCardView,
+		) : RecyclerView.ViewHolder(cardView)
+	}
+}

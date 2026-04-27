@@ -2,6 +2,8 @@ package org.jellyfin.androidtv.di
 
 import org.jellyfin.androidtv.auth.repository.AuthenticationRepository
 import org.jellyfin.androidtv.auth.repository.AuthenticationRepositoryImpl
+import org.jellyfin.androidtv.auth.repository.ProfileSelectorRepository
+import org.jellyfin.androidtv.auth.repository.ProfileSelectorRepositoryImpl
 import org.jellyfin.androidtv.auth.repository.ServerRepository
 import org.jellyfin.androidtv.auth.repository.ServerRepositoryImpl
 import org.jellyfin.androidtv.auth.repository.ServerUserRepository
@@ -19,6 +21,7 @@ val authModule = module {
 	single<AuthenticationRepository> {
 		AuthenticationRepositoryImpl(get(), get(), get(), get(), get(), get(defaultDeviceInfo))
 	}
+	single<ProfileSelectorRepository> { ProfileSelectorRepositoryImpl(get(), get(), get(), get()) }
 	single<ServerRepository> { ServerRepositoryImpl(get(), get()) }
 	single<ServerUserRepository> { ServerUserRepositoryImpl(get(), get()) }
 	single<SessionRepository> {

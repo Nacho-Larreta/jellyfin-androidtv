@@ -1,0 +1,24 @@
+#!/bin/sh
+
+set -eu
+
+PROJECT_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+WORKSPACE_ROOT=$(CDPATH= cd -- "$PROJECT_ROOT/.." && pwd)
+
+mkdir -p \
+	"$WORKSPACE_ROOT/.androidtv-home" \
+	"$WORKSPACE_ROOT/.android-user-home" \
+	"$WORKSPACE_ROOT/.gradle-androidtv"
+
+export ANDROID_HOME="$WORKSPACE_ROOT/.android-sdk"
+export ANDROID_SDK_ROOT="$WORKSPACE_ROOT/.android-sdk"
+export ANDROID_USER_HOME="$WORKSPACE_ROOT/.android-user-home"
+export GRADLE_USER_HOME="$WORKSPACE_ROOT/.gradle-androidtv"
+
+exec "$PROJECT_ROOT/gradlew" \
+	--no-daemon \
+	--console=plain \
+	-Duser.home="$WORKSPACE_ROOT/.androidtv-home" \
+	-Dorg.gradle.vfs.watch=false \
+	-Dorg.gradle.unsafe.watch-fs=false \
+	"$@"

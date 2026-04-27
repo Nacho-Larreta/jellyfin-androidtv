@@ -30,6 +30,8 @@ data class Session(
 	val userId: UUID,
 	val serverId: UUID,
 	val accessToken: String,
+	val ownerUserId: UUID? = null,
+	val profileSelectorId: UUID? = null,
 )
 
 enum class SessionRepositoryState {
@@ -44,6 +46,7 @@ interface SessionRepository {
 
 	suspend fun restoreSession(destroyOnly: Boolean)
 	suspend fun switchCurrentSession(serverId: UUID, userId: UUID): Boolean
+	suspend fun switchCurrentSession(session: Session): Boolean
 	fun destroyCurrentSession()
 }
 
@@ -88,21 +91,24 @@ class SessionRepositoryImpl(
 	}
 
 	override suspend fun switchCurrentSession(serverId: UUID, userId: UUID): Boolean {
-		// No change in user - don't switch
-		if (currentSession.value?.userId == userId) {
-			Timber.d("Current session user is the same as the requested user")
-			return false
+		val session = createUserSession(serverId, userId)
+			?: run {
+				Timber.w("Could not switch to non-existing session for user $userId")
+				return false
+			}
+
+		return switchCurrentSession(session)
+	}
+
+	override suspend fun switchCurrentSession(session: Session): Boolean {
+		// No change in session - don't switch
+		if (currentSession.value == session) {
+			Timber.d("Current session is the same as the requested session")
+			return true
 		}
 
 		_state.value = SessionRepositoryState.SWITCHING_SESSION
-		Timber.i("Switching current session to user $userId")
-
-		val session = createUserSession(serverId, userId)
-		if (session == null) {
-			Timber.w("Could not switch to non-existing session for user $userId")
-			_state.value = SessionRepositoryState.READY
-			return false
-		}
+		Timber.i("Switching current session to user ${session.userId}")
 
 		val switched = setCurrentSession(session)
 		_state.value = SessionRepositoryState.READY
@@ -122,12 +128,10 @@ class SessionRepositoryImpl(
 		var server: Server? = null
 
 		if (session != null) {
-			// No change in session - don't switch
-			if (currentSession.value?.userId == session.userId) return true
-
 			// Update last active user
 			authenticationPreferences[AuthenticationPreferences.lastServerId] = session.serverId.toString()
 			authenticationPreferences[AuthenticationPreferences.lastUserId] = session.userId.toString()
+			authenticationPreferences[AuthenticationPreferences.lastOwnerUserId] = session.ownerUserId?.toString().orEmpty()
 
 			// Check if server version is supported
 			server = serverRepository.getServer(session.serverId, true)
@@ -169,19 +173,35 @@ class SessionRepositoryImpl(
 	private fun createLastUserSession(): Session? {
 		val lastUserId = authenticationPreferences[AuthenticationPreferences.lastUserId].toUUIDOrNull()
 		val lastServerId = authenticationPreferences[AuthenticationPreferences.lastServerId].toUUIDOrNull()
+		val lastOwnerUserId = authenticationPreferences[AuthenticationPreferences.lastOwnerUserId].toUUIDOrNull()
 
-		return if (lastUserId != null && lastServerId != null) createUserSession(lastServerId, lastUserId)
+		return if (lastUserId != null && lastServerId != null) {
+			val restoreUserId = lastOwnerUserId ?: lastUserId
+			createUserSession(
+				serverId = lastServerId,
+				userId = restoreUserId,
+				ownerUserId = lastOwnerUserId,
+				profileSelectorId = authenticationStore.getUser(lastServerId, restoreUserId)?.profileSelectorId,
+			)
+		}
 		else null
 	}
 
-	private fun createUserSession(serverId: UUID, userId: UUID): Session? {
+	private fun createUserSession(
+		serverId: UUID,
+		userId: UUID,
+		ownerUserId: UUID? = null,
+		profileSelectorId: UUID? = null,
+	): Session? {
 		val account = authenticationStore.getUser(serverId, userId)
 		if (account?.accessToken == null) return null
 
 		return Session(
 			userId = userId,
 			serverId = serverId,
-			accessToken = account.accessToken
+			accessToken = account.accessToken,
+			ownerUserId = ownerUserId ?: account.profileSelectorOwnerUserId,
+			profileSelectorId = profileSelectorId ?: account.profileSelectorId,
 		)
 	}
 

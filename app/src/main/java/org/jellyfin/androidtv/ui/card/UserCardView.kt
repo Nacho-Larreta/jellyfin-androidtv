@@ -6,6 +6,7 @@ import android.os.Build
 import android.util.AttributeSet
 import android.view.KeyEvent
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,6 +15,7 @@ import androidx.compose.foundation.interaction.FocusInteraction
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
@@ -24,6 +26,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -54,6 +57,8 @@ fun UserCard(
 	modifier: Modifier = Modifier,
 	interactionSource: MutableInteractionSource = remember { MutableInteractionSource() },
 	shape: Shape = CircleShape,
+	badge: (@Composable BoxScope.() -> Unit)? = null,
+	indicator: (@Composable BoxScope.() -> Unit)? = null,
 ) {
 	val focused by interactionSource.collectIsFocusedAsState()
 
@@ -78,6 +83,8 @@ fun UserCard(
 				.border(2.dp, color.first, shape)
 		) {
 			image()
+			indicator?.invoke(this)
+			badge?.invoke(this)
 		}
 
 		Spacer(Modifier.height(8.dp))
@@ -109,6 +116,8 @@ class UserCardView @JvmOverloads constructor(
 ) : AbstractComposeView(context, attrs, defStyleAttr) {
 	var name by mutableStateOf<String?>(null)
 	var image by mutableStateOf<String?>(null)
+	var badgeText by mutableStateOf<String?>(null)
+	var activeIndicator by mutableStateOf(false)
 	private var focused by mutableStateOf(false)
 
 	init {
@@ -162,6 +171,36 @@ class UserCardView @JvmOverloads constructor(
 					text = name.orEmpty(),
 					maxLines = 1
 				)
+			},
+			indicator = if (activeIndicator) {
+				{
+					Box(
+						modifier = Modifier
+							.padding(10.dp)
+							.align(Alignment.TopStart)
+							.width(12.dp)
+							.height(12.dp)
+							.clip(CircleShape)
+							.background(JellyfinTheme.colorScheme.badge)
+					)
+				}
+			} else null,
+			badge = badgeText?.let { text ->
+				{
+					Box(
+						modifier = Modifier
+							.align(Alignment.TopEnd)
+							.padding(10.dp)
+							.clip(RoundedCornerShape(999.dp))
+							.background(JellyfinTheme.colorScheme.scrim)
+							.padding(horizontal = 8.dp, vertical = 4.dp)
+					) {
+						Text(
+							text = text,
+							maxLines = 1
+						)
+					}
+				}
 			},
 			modifier = Modifier
 				.padding(horizontal = 6.dp, vertical = 8.dp)

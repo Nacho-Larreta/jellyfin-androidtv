@@ -22,6 +22,7 @@ import coil3.compose.AsyncImagePainter
 import coil3.compose.rememberAsyncImagePainter
 import kotlinx.coroutines.flow.filterNotNull
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.auth.repository.ProfileSelectorRepository
 import org.jellyfin.androidtv.auth.repository.SessionRepository
 import org.jellyfin.androidtv.auth.repository.UserRepository
 import org.jellyfin.androidtv.ui.NowPlayingComposable
@@ -78,9 +79,11 @@ private fun MainToolbar(
 	val focusRequester = remember { FocusRequester() }
 	val navigationRepository = koinInject<NavigationRepository>()
 	val mediaManager = koinInject<MediaManager>()
+	val profileSelectorRepository = koinInject<ProfileSelectorRepository>()
 	val sessionRepository = koinInject<SessionRepository>()
 	val settingsViewModel = koinActivityViewModel<SettingsViewModel>()
 	val activity = LocalActivity.current
+	val currentSession by remember { sessionRepository.currentSession }.collectAsState(null)
 	val activeButtonColors = ButtonDefaults.colors(
 		containerColor = JellyfinTheme.colorScheme.buttonActive,
 		contentColor = JellyfinTheme.colorScheme.onButtonActive,
@@ -100,11 +103,30 @@ private fun MainToolbar(
 					onClick = {
 						if (activeButton != MainToolbarActiveButton.User) {
 							mediaManager.clearAudioQueue()
-							sessionRepository.destroyCurrentSession()
 
-							// Open login activity
-							activity?.startActivity(ActivityDestinations.startup(activity))
-							activity?.finishAfterTransition()
+							if (profileSelectorRepository.supportsProfileSelector(currentSession)) {
+								activity?.let { currentActivity ->
+									currentActivity.startActivity(
+										ActivityDestinations.startup(
+											context = currentActivity,
+											hideSplash = true,
+											openProfileSelector = true,
+										)
+									)
+								}
+							} else {
+								sessionRepository.destroyCurrentSession()
+
+								activity?.let { currentActivity ->
+									// Open login activity
+									currentActivity.startActivity(
+										ActivityDestinations.startup(
+											context = currentActivity,
+										)
+									)
+									currentActivity.finishAfterTransition()
+								}
+							}
 						}
 					},
 					colors = if (activeButton == MainToolbarActiveButton.User) activeButtonColors else ButtonDefaults.colors(),

@@ -16,8 +16,13 @@ object ActivityDestinations {
 		)
 	}
 
-	fun startup(context: Context, hideSplash: Boolean = true) = Intent(context, StartupActivity::class.java).apply {
+	fun startup(
+		context: Context,
+		hideSplash: Boolean = true,
+		openProfileSelector: Boolean = false,
+	) = Intent(context, StartupActivity::class.java).apply {
 		putExtra(StartupActivity.EXTRA_HIDE_SPLASH, hideSplash)
+		putExtra(StartupActivity.EXTRA_OPEN_PROFILE_SELECTOR, openProfileSelector)
 		// Remove history to prevent user going back to current activity
 		addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY)
 	}
