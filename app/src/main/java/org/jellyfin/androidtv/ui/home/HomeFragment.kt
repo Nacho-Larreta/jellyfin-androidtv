@@ -6,7 +6,8 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -31,6 +32,7 @@ import org.jellyfin.androidtv.auth.repository.SessionRepository
 import org.jellyfin.androidtv.data.repository.NotificationsRepository
 import org.jellyfin.androidtv.ui.shared.toolbar.MainToolbar
 import org.jellyfin.androidtv.ui.shared.toolbar.MainToolbarActiveButton
+import org.koin.androidx.compose.koinViewModel
 import org.koin.android.ext.android.inject
 
 class HomeFragment : Fragment() {
@@ -44,10 +46,17 @@ class HomeFragment : Fragment() {
 		savedInstanceState: Bundle?
 	) = content {
 		val rowsFocusRequester = remember { FocusRequester() }
+		val heroFocusRequester = remember { FocusRequester() }
+		val heroViewModel = koinViewModel<HomeHeroViewModel>()
+		val heroState by heroViewModel.state.collectAsState()
 		LaunchedEffect(rowsFocusRequester) { rowsFocusRequester.requestFocus() }
 
 		Column {
 			MainToolbar(MainToolbarActiveButton.Home)
+			HomeHero(
+				state = heroState,
+				focusRequester = heroFocusRequester,
+			)
 
 			// The leanback code has its own awful focus handling that doesn't work properly with Compose view inteop to workaround this
 			// issue we add custom behavior that only allows focus exit when the current selected row is the first one. Additionally when
@@ -68,7 +77,8 @@ class HomeFragment : Fragment() {
 							}
 						}
 					}
-					.fillMaxSize(),
+					.weight(1f)
+					.fillMaxWidth(),
 				onUpdate = { fragment ->
 					rowsSupportFragment = fragment
 				}

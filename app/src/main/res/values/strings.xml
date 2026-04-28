@@ -229,6 +229,7 @@
     <string name="lbl_subtitle_background_color">Background color</string>
     <string name="lbl_subtitle_text_stroke_color">Edge color</string>
     <string name="lbl_resume_from">Resume from %1$s</string>
+    <string name="lbl_remaining_minutes">%1$s left</string>
     <string name="lbl_from_beginning">Play from beginning</string>
     <string name="lbl_more_like_this">More like this</string>
     <string name="lbl_previous_episode">Previous episode</string>

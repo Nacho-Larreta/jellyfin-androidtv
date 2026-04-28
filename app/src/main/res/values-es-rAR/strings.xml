@@ -135,6 +135,7 @@
     <string name="lbl_previous_episode">Episodio anterior</string>
     <string name="lbl_more_like_this">Más como este</string>
     <string name="lbl_resume_from">Reanudar desde %1$s</string>
+    <string name="lbl_remaining_minutes">Faltan %1$s</string>
     <string name="lbl_resume_preroll">Reanudar pre-roll</string>
     <string name="lbl_guide_option_number">Número de canal</string>
     <string name="lbl_guide_option_played">Última reproducción</string>
