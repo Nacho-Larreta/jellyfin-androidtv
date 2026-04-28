@@ -37,18 +37,32 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.platform.AbstractComposeView
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import org.jellyfin.androidtv.ui.base.JellyfinTheme
 import org.jellyfin.androidtv.ui.base.LocalTextStyle
+import org.jellyfin.androidtv.ui.base.ProfileAvatarActiveColor
 import org.jellyfin.androidtv.ui.base.ProfilePicture
 import org.jellyfin.androidtv.ui.base.ProvideTextStyle
 import org.jellyfin.androidtv.ui.base.Text
+import org.jellyfin.androidtv.ui.base.profileAvatarPalette
 import org.jellyfin.androidtv.util.MenuBuilder
 import org.jellyfin.androidtv.util.popupMenu
 import org.jellyfin.androidtv.util.showIfNotEmpty
 
+enum class UserCardVisualStyle {
+	Default,
+	ProfileSelector,
+}
+
+@Suppress("LongParameterList")
 @Composable
 fun UserCard(
 	image: @Composable () -> Unit,
@@ -57,6 +71,10 @@ fun UserCard(
 	modifier: Modifier = Modifier,
 	interactionSource: MutableInteractionSource = remember { MutableInteractionSource() },
 	shape: Shape = CircleShape,
+	focusedBorderColor: Color? = null,
+	unfocusedBorderColor: Color? = null,
+	focusedTextColor: Color? = null,
+	unfocusedTextColor: Color? = null,
 	badge: (@Composable BoxScope.() -> Unit)? = null,
 	indicator: (@Composable BoxScope.() -> Unit)? = null,
 ) {
@@ -65,8 +83,10 @@ fun UserCard(
 	// Mix button background with input foreground because we display text beneath the profile picture on a transparent background similar
 	// to the input text
 	val color = when {
-		focused -> JellyfinTheme.colorScheme.buttonFocused to JellyfinTheme.colorScheme.onInputFocused
-		else -> JellyfinTheme.colorScheme.button to JellyfinTheme.colorScheme.onInput
+		focused -> (focusedBorderColor ?: JellyfinTheme.colorScheme.buttonFocused) to
+			(focusedTextColor ?: JellyfinTheme.colorScheme.onInputFocused)
+		else -> (unfocusedBorderColor ?: JellyfinTheme.colorScheme.button) to
+			(unfocusedTextColor ?: JellyfinTheme.colorScheme.onInput)
 	}
 	val scale by animateFloatAsState(if (focused) 1.1f else 1f, label = "UserCardFocusScale")
 
@@ -117,7 +137,11 @@ class UserCardView @JvmOverloads constructor(
 	var name by mutableStateOf<String?>(null)
 	var image by mutableStateOf<String?>(null)
 	var badgeText by mutableStateOf<String?>(null)
+	var metaText by mutableStateOf<String?>(null)
 	var activeIndicator by mutableStateOf(false)
+	var colorSeed by mutableStateOf<String?>(null)
+	var colorIndex by mutableStateOf<Int?>(null)
+	var visualStyle by mutableStateOf(UserCardVisualStyle.Default)
 	private var focused by mutableStateOf(false)
 
 	init {
@@ -147,6 +171,7 @@ class UserCardView @JvmOverloads constructor(
 		focused = gainFocus
 	}
 
+	@Suppress("LongMethod")
 	@Composable
 	override fun Content() {
 		val interactionSource = remember { MutableInteractionSource() }
@@ -156,6 +181,11 @@ class UserCardView @JvmOverloads constructor(
 		LaunchedEffect(focused) {
 			if (focused) interactionSource.emit(focusInteraction)
 			else interactionSource.emit(FocusInteraction.Unfocus(focusInteraction))
+		}
+
+		if (visualStyle == UserCardVisualStyle.ProfileSelector) {
+			ProfileSelectorUserCard(interactionSource)
+			return
 		}
 
 		UserCard(
@@ -206,8 +236,120 @@ class UserCardView @JvmOverloads constructor(
 				.padding(horizontal = 6.dp, vertical = 8.dp)
 				.width(110.dp),
 			interactionSource = interactionSource,
-			// We use our own click handler for views used in presenters
-			onClick = {}
+			// Forward pointer clicks from Compose to the Android View listener used by Leanback presenters.
+			onClick = { this@UserCardView.performClick() }
+		)
+	}
+
+	@Suppress("LongMethod")
+		@Composable
+		private fun ProfileSelectorUserCard(interactionSource: MutableInteractionSource) {
+			val profilePalette = remember(colorIndex, colorSeed, name) {
+				profileAvatarPalette(colorIndex, colorSeed ?: name.orEmpty())
+			}
+		val imageShape = RoundedCornerShape(18.dp)
+
+		UserCard(
+			image = {
+				Box(
+					modifier = Modifier
+						.fillMaxSize()
+						.background(Brush.linearGradient(listOf(profilePalette.start, profilePalette.end)))
+				) {
+					if (image.isNullOrBlank()) {
+						Text(
+							text = name?.trim()?.firstOrNull()?.uppercaseChar()?.toString().orEmpty(),
+							color = Color.White,
+							fontSize = 58.sp,
+							fontWeight = FontWeight.ExtraBold,
+							textAlign = TextAlign.Center,
+							modifier = Modifier.align(Alignment.Center)
+						)
+					} else {
+						ProfilePicture(
+							url = image,
+							iconPadding = PaddingValues(42.dp),
+							modifier = Modifier.fillMaxSize()
+						)
+					}
+				}
+			},
+			name = {
+				Column(
+					horizontalAlignment = Alignment.CenterHorizontally,
+					modifier = Modifier.fillMaxWidth()
+				) {
+					Text(
+						text = name.orEmpty(),
+						fontSize = 18.sp,
+						fontWeight = FontWeight.SemiBold,
+						textAlign = TextAlign.Center,
+						overflow = TextOverflow.Ellipsis,
+						maxLines = 1,
+						modifier = Modifier.fillMaxWidth()
+					)
+
+					if (!metaText.isNullOrBlank()) {
+						Spacer(Modifier.height(2.dp))
+
+						Text(
+							text = metaText.orEmpty(),
+							color = Color.White.copy(alpha = 0.44f),
+							fontSize = 11.sp,
+							fontWeight = FontWeight.Normal,
+							textAlign = TextAlign.Center,
+							overflow = TextOverflow.Ellipsis,
+							maxLines = 1,
+							modifier = Modifier.fillMaxWidth()
+						)
+					}
+				}
+			},
+			indicator = if (activeIndicator) {
+				{
+					Box(
+						modifier = Modifier
+							.padding(14.dp)
+							.align(Alignment.TopStart)
+							.width(12.dp)
+							.height(12.dp)
+							.clip(CircleShape)
+							.background(ProfileAvatarActiveColor)
+					)
+				}
+			} else null,
+			badge = badgeText?.let { text ->
+				{
+					Box(
+						modifier = Modifier
+							.align(Alignment.TopEnd)
+							.padding(12.dp)
+							.clip(RoundedCornerShape(999.dp))
+							.background(JellyfinTheme.colorScheme.scrim)
+							.border(1.dp, Color.White.copy(alpha = 0.32f), RoundedCornerShape(999.dp))
+							.padding(horizontal = 10.dp, vertical = 5.dp)
+					) {
+						Text(
+							text = text,
+							color = Color.White,
+							fontSize = 10.sp,
+							fontWeight = FontWeight.Bold,
+							letterSpacing = 0.5.sp,
+							maxLines = 1
+						)
+					}
+				}
+			},
+			modifier = Modifier
+				.padding(horizontal = 12.dp, vertical = 12.dp)
+				.width(128.dp),
+			interactionSource = interactionSource,
+			shape = imageShape,
+			focusedBorderColor = Color.White,
+			unfocusedBorderColor = Color.Transparent,
+			focusedTextColor = Color.White,
+			unfocusedTextColor = Color.White.copy(alpha = 0.82f),
+			onClick = { this@UserCardView.performClick() }
 		)
 	}
 }

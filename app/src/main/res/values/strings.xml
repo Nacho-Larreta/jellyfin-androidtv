@@ -24,6 +24,8 @@
     <string name="lbl_status">%1$s / %2$s</string>
     <string name="lbl_genres">Genres</string>
     <string name="lbl_search">Search</string>
+    <string name="jellyflix_my_list">My list</string>
+    <string name="jellyflix_profile_fallback">Profile</string>
     <string name="msg_not_implemented">" not implemented"</string>
     <string name="lbl_latest">Recently added</string>
     <string name="lbl_latest_in">Recently added in %1$s</string>
@@ -350,6 +352,8 @@
     <string name="welcome_content">Connect to your server to get started.</string>
     <string name="no_user_warning">We couldn\'t find any accounts!\nAdd a new account by pressing the \"Add account\" button.</string>
     <string name="who_is_watching">Who\'s watching?</string>
+    <string name="profile_selector_brand" translatable="false">JELLYFIN</string>
+    <string name="profile_selector_subtitle_owner">Choose a profile for this device on %1$s.</string>
     <string name="profile_selector_choose_profile">Choose a profile to continue.</string>
     <string name="profile_selector_pin_badge">PIN</string>
     <string name="profile_selector_pin_title">Enter PIN for %1$s</string>
@@ -358,6 +362,9 @@
     <string name="profile_selector_pin_invalid">That PIN is not correct.</string>
     <string name="profile_selector_pin_locked">This profile is temporarily locked after too many failed PIN attempts.</string>
     <string name="profile_selector_profile_disabled">This profile is currently disabled.</string>
+    <string name="profile_selector_owner_meta">Server administrator</string>
+    <string name="profile_selector_kids_meta">Kids mode</string>
+    <string name="profile_selector_pin_meta">PIN protected</string>
     <string name="add_user">Add account</string>
     <string name="help">Help</string>
     <string name="lbl_special">Special</string>

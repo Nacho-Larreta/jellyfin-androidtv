@@ -39,6 +39,8 @@
     <string name="lbl_movies">Películas</string>
     <string name="lbl_favorites">Favoritos</string>
     <string name="lbl_search">Buscar</string>
+    <string name="jellyflix_my_list">Mi lista</string>
+    <string name="jellyflix_profile_fallback">Perfil</string>
     <string name="lbl_genres">Géneros</string>
     <string name="lbl_views">Vistas</string>
     <string name="lbl_on_now">Ahora</string>
@@ -629,4 +631,16 @@
     <string name="filters">Filtros</string>
     <string name="backdrop_behavior_with_blur">Fondo con desenfoque</string>
     <string name="backdrop_behavior_without_blur">Fondo sin desenfoque</string>
+    <string name="profile_selector_subtitle_owner">Elegí un perfil para este dispositivo en %1$s.</string>
+    <string name="profile_selector_choose_profile">Elegí un perfil para continuar.</string>
+    <string name="profile_selector_pin_badge">PIN</string>
+    <string name="profile_selector_pin_title">Ingresá el PIN de %1$s</string>
+    <string name="profile_selector_pin_message">Este perfil requiere PIN antes de continuar.</string>
+    <string name="profile_selector_pin_hint">4-6 dígitos</string>
+    <string name="profile_selector_pin_invalid">Ese PIN no es correcto.</string>
+    <string name="profile_selector_pin_locked">Este perfil está bloqueado temporalmente por demasiados intentos fallidos.</string>
+    <string name="profile_selector_profile_disabled">Este perfil está deshabilitado.</string>
+    <string name="profile_selector_owner_meta">Administrador del servidor</string>
+    <string name="profile_selector_kids_meta">Modo niños</string>
+    <string name="profile_selector_pin_meta">Protegido con PIN</string>
 </resources>

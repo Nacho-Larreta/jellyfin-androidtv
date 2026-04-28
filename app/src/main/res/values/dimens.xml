@@ -1,6 +1,10 @@
 <resources>
     <dimen name="overscan_horizontal">27dp</dimen>
     <dimen name="overscan_vertical">48dp</dimen>
+    <dimen name="profile_selector_padding_top">30dp</dimen>
+    <dimen name="profile_selector_grid_height">196dp</dimen>
+    <dimen name="profile_selector_card_width">128dp</dimen>
+    <dimen name="profile_selector_card_spacing">16dp</dimen>
 
     <fraction name="card_scale_default">100%</fraction>
     <fraction name="card_scale_focus">115%</fraction>

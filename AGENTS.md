@@ -37,6 +37,8 @@ Cliente nativo para Android TV / Fire TV. Es el cliente mas independiente del ec
 ./gradlew-local :app:testDebugUnitTest
 ./gradlew-local :app:lintDebug
 ./gradlew-local :app:assembleDebug
+../scripts/run-jellyfin-androidtv-emulator.sh
+../scripts/tv-remote interactive
 ```
 
 ### Notas del host
@@ -49,6 +51,31 @@ Cliente nativo para Android TV / Fire TV. Es el cliente mas independiente del ec
   - `-Duser.home=...`
   - `-Dorg.gradle.vfs.watch=false`
 - Si usas `./gradlew` directo en este host, es esperable ruido de analytics/Kotlin daemon.
+- Para probar contra el backend local desde el emulador, usar `http://10.0.2.2:8096`.
+- El AVD reusable del workspace se llama `jellyfin_android_tv` y vive en `../.androidtv-home/.android/avd`.
+
+### Control remoto del emulador
+
+- El teclado fisico del Mac y `Extended Controls` del emulador pueden no entregar eventos a la app.
+- Usar `../scripts/tv-remote interactive` como control remoto ADB.
+- Mapeo principal:
+  - `flechas` o `w/a/s/d`: D-pad
+  - `Enter` u `o`: OK
+  - `Esc` o `b`: Back
+  - `Space` o `p`: Play/Pause
+  - `f`: fast-forward
+  - `r`: rewind
+  - `c`: captions
+  - `u`: audio track
+  - `/`: search
+  - `t`: text input
+  - `q`: salir del helper
+- Comandos directos utiles:
+  - `../scripts/tv-remote ok`
+  - `../scripts/tv-remote back`
+  - `../scripts/tv-remote play-pause`
+  - `../scripts/tv-remote text http://10.0.2.2:8096`
+- Para Android TV real, salir del player depende del boton fisico/remoto `Back`; no siempre hay un boton visual de volver en el overlay.
 
 ## Modulos importantes
 

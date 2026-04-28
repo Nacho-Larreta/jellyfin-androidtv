@@ -41,7 +41,6 @@ import org.jellyfin.sdk.api.client.exception.TimeoutException
 import org.jellyfin.sdk.api.client.extensions.itemsApi
 import org.jellyfin.sdk.api.client.extensions.tvShowsApi
 import org.jellyfin.sdk.api.client.extensions.userLibraryApi
-import org.jellyfin.sdk.api.client.extensions.userViewsApi
 import org.jellyfin.sdk.model.api.BaseItemDto
 import org.jellyfin.sdk.model.api.BaseItemKind
 import org.jellyfin.sdk.model.api.ImageType
@@ -233,11 +232,7 @@ class LeanbackChannelWorker(
 	 */
 	@Suppress("RestrictedApi")
 	private suspend fun getMyMedia(): List<BaseItemDto> {
-		val response by api.userViewsApi.getUserViews(includeHidden = false)
-
-		// Add new items
-		return response.items
-			.filter { userViewsRepository.isSupported(it.collectionType) }
+		return userViewsRepository.getUserViews(includeHidden = false).toList()
 	}
 
 	/**

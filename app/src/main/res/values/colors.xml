@@ -12,6 +12,9 @@
     <color name="white">#FFFFFF</color>
     <color name="red">#CC3333</color>
     <color name="transparent">#00000000</color>
+    <color name="profile_selector_background_start">#10131A</color>
+    <color name="profile_selector_background_end">#050608</color>
+    <color name="profile_selector_secondary_text">#CCFFFFFF</color>
 
     <!-- Semi-Transparent Blacks -->
     <color name="black_transparent_dark">#E6000000</color>

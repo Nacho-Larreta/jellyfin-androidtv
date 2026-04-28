@@ -11,6 +11,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
@@ -197,15 +198,46 @@ public class CustomPlaybackOverlayFragment extends Fragment implements LiveTvGui
         binding.getRoot().addView(tvGuideBinding.getRoot());
         tvGuideBinding.getRoot().setVisibility(View.GONE);
 
-        binding.getRoot().setOnTouchListener((v, event) -> {
-            //and then manage our fade timer
-            if (mFadeEnabled) startFadeTimer();
-
-            Timber.d("Got touch event.");
-            return false;
-        });
+        binding.getRoot().setOnTouchListener((v, event) -> handlePlaybackTouch(v, event));
+        binding.exoPlayerView.setOnTouchListener((v, event) -> handlePlaybackTouch(v, event));
+        binding.skipOverlay.setOnTouchListener((v, event) -> handlePlaybackTouch(v, event));
 
         return binding.getRoot();
+    }
+
+    private boolean handlePlaybackTouch(View v, MotionEvent event) {
+        // When Leanback controls are visible, let them own touch/focus so buttons,
+        // captions, audio and the progress bar remain interactive.
+        if (mIsVisible) return false;
+
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                return true;
+            case MotionEvent.ACTION_UP:
+                v.performClick();
+                handlePlaybackSurfaceClick();
+                return true;
+            case MotionEvent.ACTION_CANCEL:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private void handlePlaybackSurfaceClick() {
+        PlaybackController playbackController = playbackControllerContainer.getValue().getPlaybackController();
+        if (playbackController == null || mGuideVisible || mPopupPanelVisible) return;
+
+        playbackController.playPause();
+
+        if (leanbackOverlayFragment != null) {
+            leanbackOverlayFragment.setShouldShowOverlay(true);
+            leanbackOverlayFragment.showControlsOverlay(true);
+            leanbackOverlayFragment.updatePlayState();
+            View overlayView = leanbackOverlayFragment.getView();
+            if (overlayView != null) overlayView.requestFocus();
+            setFadingEnabled(!playbackController.isPaused());
+        }
     }
 
     @Override
@@ -316,6 +348,11 @@ public class CustomPlaybackOverlayFragment extends Fragment implements LiveTvGui
             leanbackOverlayFragment.initFromView(this);
             leanbackOverlayFragment.mediaInfoChanged();
             leanbackOverlayFragment.setOnKeyInterceptListener(keyListener);
+
+            View overlayView = leanbackOverlayFragment.getView();
+            if (overlayView != null) {
+                overlayView.setOnTouchListener((v, event) -> handlePlaybackTouch(v, event));
+            }
         }
     }
 

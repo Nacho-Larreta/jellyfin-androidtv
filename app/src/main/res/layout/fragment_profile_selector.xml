@@ -4,30 +4,52 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@drawable/shape_profile_selector_background"
     android:clipChildren="false"
     android:clipToPadding="false"
     android:paddingHorizontal="@dimen/overscan_horizontal"
+    android:paddingTop="@dimen/profile_selector_padding_top"
     android:paddingBottom="@dimen/overscan_vertical">
 
     <TextView
-        android:id="@+id/title"
-        style="@style/Widget.Jellyfin.Row.Header"
-        android:layout_width="0dp"
+        android:id="@+id/brand"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:gravity="center"
-        android:text="@string/who_is_watching"
-        app:layout_constraintEnd_toEndOf="parent"
+        android:fontFamily="sans"
+        android:letterSpacing="0.12"
+        android:text="@string/profile_selector_brand"
+        android:textAllCaps="true"
+        android:textColor="@color/white"
+        android:textSize="24sp"
+        android:textStyle="bold"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
+
+    <TextView
+        android:id="@+id/title"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="18dp"
+        android:fontFamily="sans"
+        android:gravity="center"
+        android:text="@string/who_is_watching"
+        android:textAlignment="center"
+        android:textColor="@color/white"
+        android:textSize="44sp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        tools:text="Who's watching?" />
 
     <TextView
         android:id="@+id/subtitle"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
         android:gravity="center"
-        android:paddingTop="8dp"
-        android:textColor="@color/white"
+        android:textAlignment="center"
+        android:textColor="@color/profile_selector_secondary_text"
+        android:textSize="16sp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/title"
@@ -36,14 +58,15 @@
     <androidx.leanback.widget.HorizontalGridView
         android:id="@+id/users"
         android:layout_width="match_parent"
-        android:layout_height="153dp"
+        android:layout_height="@dimen/profile_selector_grid_height"
+        android:layout_marginTop="30dp"
         android:clipChildren="false"
         android:clipToPadding="false"
         android:scrollbars="none"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/subtitle"
-        app:rowHeight="153dp"
+        app:rowHeight="@dimen/profile_selector_grid_height"
         tools:itemCount="4"
         tools:listitem="@layout/view_card_default" />
 
@@ -53,6 +76,7 @@
         android:layout_height="0dp"
         android:gravity="center"
         android:text="@string/no_user_warning"
+        android:textColor="@color/profile_selector_secondary_text"
         app:layout_constraintBottom_toBottomOf="@id/users"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
@@ -63,9 +87,10 @@
         android:id="@+id/message"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
         android:gravity="center"
-        android:paddingTop="8dp"
-        android:textColor="@color/white"
+        android:textColor="@color/profile_selector_secondary_text"
+        android:textSize="14sp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/users"
@@ -75,6 +100,7 @@
         android:id="@+id/actions_container"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:layout_marginTop="30dp"
         android:gravity="center"
         android:orientation="horizontal"
         app:layout_constraintEnd_toEndOf="parent"
@@ -83,18 +109,19 @@
 
         <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/sign_out_button"
-            style="@style/Button.Default"
-            android:layout_width="wrap_content"
+            style="@style/Button.ProfileSelector"
+            android:layout_width="210dp"
             android:layout_height="51dp"
             android:layout_margin="8dp"
             android:text="@string/lbl_sign_out" />
 
         <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/cancel_button"
-            style="@style/Button.Default"
-            android:layout_width="wrap_content"
+            style="@style/Button.ProfileSelector"
+            android:layout_width="210dp"
             android:layout_height="51dp"
             android:layout_margin="8dp"
+            android:visibility="gone"
             android:text="@string/btn_cancel" />
     </LinearLayout>
 

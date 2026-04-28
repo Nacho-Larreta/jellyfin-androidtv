@@ -656,6 +656,9 @@ public class BrowseGridFragment extends Fragment implements View.OnKeyListener {
         FilterOptions filters = new FilterOptions();
         filters.setFavoriteOnly(libraryPreferences.get(LibraryPreferences.Companion.getFilterFavoritesOnly()));
         filters.setUnwatchedOnly(libraryPreferences.get(LibraryPreferences.Companion.getFilterUnwatchedOnly()));
+        if (getArguments().getBoolean(Extras.FilterFavoritesOnly, false)) {
+            filters.setFavoriteOnly(true);
+        }
 
         mAdapter.setRetrieveFinishedListener(new EmptyResponse(getLifecycle()) {
             @Override

@@ -6,7 +6,6 @@ import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.os.bundleOf
 import androidx.core.view.isVisible
 import androidx.fragment.app.FragmentActivity
 import androidx.fragment.app.add
@@ -52,7 +51,7 @@ import org.koin.androidx.viewmodel.ext.android.viewModel
 import timber.log.Timber
 import java.util.UUID
 
-class StartupActivity : FragmentActivity() {
+class StartupActivity : FragmentActivity(), ProfileSelectorFragment.Host {
 	companion object {
 		const val EXTRA_ITEM_ID = "ItemId"
 		const val EXTRA_ITEM_IS_USER_VIEW = "ItemIsUserView"
@@ -70,7 +69,10 @@ class StartupActivity : FragmentActivity() {
 	private val itemLauncher: ItemLauncher by inject()
 
 	private lateinit var binding: ActivityStartupBinding
-	private val shouldOpenProfileSelector get() = intent.getBooleanExtra(EXTRA_OPEN_PROFILE_SELECTOR, false)
+	private var openedForProfileSelector = false
+	private var profileSelectorRequestConsumed = false
+	private var profileSelectedFromSelector = false
+	private var returningToMainActivity = false
 
 	private val networkPermissionsRequester = registerForActivityResult(
 		ActivityResultContracts.RequestMultiplePermissions()
@@ -96,6 +98,8 @@ class StartupActivity : FragmentActivity() {
 		binding.screensaver.isVisible = false
 		setContentView(binding.root)
 
+		openedForProfileSelector = intent.getBooleanExtra(EXTRA_OPEN_PROFILE_SELECTOR, false)
+
 		if (!intent.getBooleanExtra(EXTRA_HIDE_SPLASH, false)) showSplash()
 
 		// Ensure basic permissions
@@ -115,17 +119,31 @@ class StartupActivity : FragmentActivity() {
 		.distinctUntilChanged()
 		.onEach { session ->
 			if (session != null) {
-				when (val action = withContext(Dispatchers.IO) {
+				if (returningToMainActivity) {
+					return@onEach
+				}
+
+				if (openedForProfileSelector && profileSelectedFromSelector) {
+					returnToMainActivityAfterProfileSwitch()
+					return@onEach
+				}
+
+				val forceProfileSelector = consumeProfileSelectorRequest()
+				val action = withContext(Dispatchers.IO) {
 					profileSelectorRepository.resolveStartupAction(
 						session = session,
-						forceSelector = shouldOpenProfileSelector,
+						forceSelector = forceProfileSelector,
 					)
-				}) {
+				}
+
+				if (returningToMainActivity || openedForProfileSelector && profileSelectedFromSelector) {
+					return@onEach
+				}
+
+				when (action) {
 					ProfileSelectorStartupAction.ContinueToApp -> {
-						if (shouldOpenProfileSelector) {
-							Timber.i("Profile switch finished, returning to the existing MainActivity.")
-							navigationRepository.reset(clearHistory = true)
-							finishAfterTransition()
+						if (openedForProfileSelector) {
+							returnToMainActivityAfterProfileSwitch()
 							return@onEach
 						}
 
@@ -216,9 +234,11 @@ class StartupActivity : FragmentActivity() {
 	private fun showServer(id: UUID) = supportFragmentManager.commit {
 		replace<StartupToolbarFragment>(R.id.content_view)
 		add<ServerFragment>(
-			R.id.content_view, null, bundleOf(
-				ServerFragment.ARG_SERVER_ID to id.toString()
-			)
+			R.id.content_view,
+			null,
+			Bundle().apply {
+				putString(ServerFragment.ARG_SERVER_ID, id.toString())
+			},
 		)
 	}
 
@@ -228,12 +248,46 @@ class StartupActivity : FragmentActivity() {
 	}
 
 	private fun showProfileSelector() = supportFragmentManager.commit {
-		replace<StartupToolbarFragment>(R.id.content_view)
-		add<ProfileSelectorFragment>(R.id.content_view)
+		replace<ProfileSelectorFragment>(R.id.content_view)
+	}
+
+	private fun consumeProfileSelectorRequest(): Boolean {
+		if (!openedForProfileSelector || profileSelectorRequestConsumed) {
+			return false
+		}
+
+		profileSelectorRequestConsumed = true
+		intent.removeExtra(EXTRA_OPEN_PROFILE_SELECTOR)
+		return true
+	}
+
+	override fun onProfileSelectedFromSelector() {
+		profileSelectedFromSelector = true
+		if (openedForProfileSelector &&
+			sessionRepository.state.value == SessionRepositoryState.READY &&
+			sessionRepository.currentSession.value != null
+		) {
+			returnToMainActivityAfterProfileSwitch()
+		}
+	}
+
+	private fun returnToMainActivityAfterProfileSwitch() {
+		if (returningToMainActivity) {
+			return
+		}
+
+		returningToMainActivity = true
+		Timber.i("Profile switch finished, returning to MainActivity with the new session.")
+		navigationRepository.reset(clearHistory = true)
+		finishAfterTransition()
 	}
 
 	override fun onNewIntent(intent: Intent) {
 		super.onNewIntent(intent)
 		setIntent(intent)
+		openedForProfileSelector = intent.getBooleanExtra(EXTRA_OPEN_PROFILE_SELECTOR, false)
+		profileSelectorRequestConsumed = false
+		profileSelectedFromSelector = false
+		returningToMainActivity = false
 	}
 }

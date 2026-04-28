@@ -77,6 +77,9 @@ class HomeRowsFragment : RowsSupportFragment(), AudioEventListener, View.OnKeyLi
 	private var currentItem: BaseRowItem? = null
 	private var currentRow: ListRow? = null
 	private var justLoaded = true
+	private val rowsAdapter: MutableObjectAdapter<Row>
+		@Suppress("UNCHECKED_CAST")
+		get() = adapter as MutableObjectAdapter<Row>
 
 	// Special rows
 	private val notificationsRow by lazy { NotificationsHomeFragmentRow(lifecycleScope, notificationsRepository) }
@@ -136,13 +139,13 @@ class HomeRowsFragment : RowsSupportFragment(), AudioEventListener, View.OnKeyLi
 
 			// Add sections to layout
 			withContext(Dispatchers.Main) {
-				val cardPresenter = CardPresenter()
+					val cardPresenter = CardPresenter()
 
-				// Add rows in order
-				notificationsRow.addToRowsAdapter(requireContext(), cardPresenter, adapter as MutableObjectAdapter<Row>)
-				nowPlaying.addToRowsAdapter(requireContext(), cardPresenter, adapter as MutableObjectAdapter<Row>)
-				for (row in rows) row.addToRowsAdapter(requireContext(), cardPresenter, adapter as MutableObjectAdapter<Row>)
-			}
+					// Add rows in order
+					notificationsRow.addToRowsAdapter(requireContext(), cardPresenter, rowsAdapter)
+					nowPlaying.addToRowsAdapter(requireContext(), cardPresenter, rowsAdapter)
+					for (row in rows) row.addToRowsAdapter(requireContext(), cardPresenter, rowsAdapter)
+				}
 		}
 
 		onItemViewClickedListener = CompositeClickedListener().apply {
@@ -205,14 +208,14 @@ class HomeRowsFragment : RowsSupportFragment(), AudioEventListener, View.OnKeyLi
 
 		// Update audio queue
 		Timber.i("Updating audio queue in HomeFragment (onResume)")
-		nowPlaying.update(requireContext(), adapter as MutableObjectAdapter<Row>)
+		nowPlaying.update(requireContext(), rowsAdapter)
 	}
 
 	override fun onQueueStatusChanged(hasQueue: Boolean) {
 		if (activity == null || requireActivity().isFinishing) return
 
 		Timber.i("Updating audio queue in HomeFragment (onQueueStatusChanged)")
-		nowPlaying.update(requireContext(), adapter as MutableObjectAdapter<Row>)
+		nowPlaying.update(requireContext(), rowsAdapter)
 	}
 
 	private fun refreshRows(force: Boolean = false, delayed: Boolean = true) {

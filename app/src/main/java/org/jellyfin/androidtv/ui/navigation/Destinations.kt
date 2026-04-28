@@ -50,6 +50,11 @@ object Destinations {
 		Extras.Folder to Json.encodeToString(item),
 	)
 
+	fun libraryFavorites(item: BaseItemDto) = fragmentDestination<BrowseGridFragment>(
+		Extras.Folder to Json.encodeToString(item),
+		Extras.FilterFavoritesOnly to true,
+	)
+
 	// TODO only pass item id instead of complete JSON to browsing destinations
 	fun collectionBrowser(item: BaseItemDto) = fragmentDestination<CollectionFragment>(
 		Extras.Folder to Json.encodeToString(item),

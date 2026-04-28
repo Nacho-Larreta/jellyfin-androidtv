@@ -6,7 +6,6 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
-import androidx.core.os.bundleOf
 import androidx.core.view.isGone
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
@@ -78,10 +77,12 @@ class ServerFragment : Fragment() {
 					AuthenticatingState -> Unit
 					AuthenticatedState -> Unit
 					// Actions
-					RequireSignInState -> navigateFragment<UserLoginFragment>(bundleOf(
-						UserLoginFragment.ARG_SERVER_ID to server.id.toString(),
-						UserLoginFragment.ARG_USERNAME to user.name,
-					))
+					RequireSignInState -> navigateFragment<UserLoginFragment>(
+						Bundle().apply {
+							putString(UserLoginFragment.ARG_SERVER_ID, server.id.toString())
+							putString(UserLoginFragment.ARG_USERNAME, user.name)
+						}
+					)
 					// Errors
 					ServerUnavailableState,
 					is ApiClientErrorLoginState -> Toast.makeText(context, R.string.server_connection_failed, Toast.LENGTH_LONG).show()
@@ -142,10 +143,10 @@ class ServerFragment : Fragment() {
 
 		binding.addUserButton.setOnClickListener {
 			navigateFragment<UserLoginFragment>(
-				args = bundleOf(
-					UserLoginFragment.ARG_SERVER_ID to server.id.toString(),
-					UserLoginFragment.ARG_USERNAME to null
-				)
+				args = Bundle().apply {
+					putString(UserLoginFragment.ARG_SERVER_ID, server.id.toString())
+					putString(UserLoginFragment.ARG_USERNAME, null)
+				}
 			)
 		}
 
@@ -169,7 +170,7 @@ class ServerFragment : Fragment() {
 	}
 
 	private inline fun <reified F : Fragment> navigateFragment(
-		args: Bundle = bundleOf(),
+		args: Bundle = Bundle(),
 		keepToolbar: Boolean = false,
 		keepHistory: Boolean = true,
 	) {
@@ -215,29 +216,29 @@ class ServerFragment : Fragment() {
 			return ViewHolder(cardView)
 		}
 
-		override fun onBindViewHolder(holder: ViewHolder, user: User) {
-			holder.cardView.name = user.name
-			holder.cardView.image = startupViewModel.getUserImage(server, user)
+		override fun onBindViewHolder(holder: ViewHolder, item: User) {
+			holder.cardView.name = item.name
+			holder.cardView.image = startupViewModel.getUserImage(server, item)
 
 			holder.cardView.setPopupMenu {
 				// Logout button
-				if (user is PrivateUser && user.accessToken != null) {
-					item(context.getString(R.string.lbl_sign_out)) {
-						authenticationRepository.logout(user)
+				if (item is PrivateUser && item.accessToken != null) {
+					this.item(context.getString(R.string.lbl_sign_out)) {
+						authenticationRepository.logout(item)
 					}
 				}
 
 				// Remove button
-				if (user is PrivateUser) {
-					item(context.getString(R.string.lbl_remove)) {
-						serverUserRepository.deleteStoredUser(user)
+				if (item is PrivateUser) {
+					this.item(context.getString(R.string.lbl_remove)) {
+						serverUserRepository.deleteStoredUser(item)
 						startupViewModel.loadUsers(server)
 					}
 				}
 			}
 
 			holder.cardView.setOnClickListener {
-				onItemPressed(user)
+				onItemPressed(item)
 			}
 		}
 
@@ -246,4 +247,3 @@ class ServerFragment : Fragment() {
 		) : RecyclerView.ViewHolder(cardView)
 	}
 }
-

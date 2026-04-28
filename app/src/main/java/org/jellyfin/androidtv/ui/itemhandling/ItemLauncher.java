@@ -7,6 +7,8 @@ import androidx.annotation.Nullable;
 import org.jellyfin.androidtv.constant.LiveTvOption;
 import org.jellyfin.androidtv.constant.QueryType;
 import org.jellyfin.androidtv.data.model.ChapterItemInfo;
+import org.jellyfin.androidtv.data.model.JellyflixCollectionType;
+import org.jellyfin.androidtv.data.repository.UserViewsRepository;
 import org.jellyfin.androidtv.preference.LibraryPreferences;
 import org.jellyfin.androidtv.preference.PreferencesRepository;
 import org.jellyfin.androidtv.ui.navigation.Destination;
@@ -37,6 +39,7 @@ public class ItemLauncher {
     private final Lazy<MediaManager> mediaManager = KoinJavaComponent.<MediaManager>inject(MediaManager.class);
     private final Lazy<PlaybackLauncher> playbackLauncher = KoinJavaComponent.<PlaybackLauncher>inject(PlaybackLauncher.class);
     private final Lazy<PlaybackHelper> playbackHelper = KoinJavaComponent.<PlaybackHelper>inject(PlaybackHelper.class);
+    private final Lazy<UserViewsRepository> userViewsRepository = KoinJavaComponent.<UserViewsRepository>inject(UserViewsRepository.class);
 
     public void launchUserView(@Nullable final BaseItemDto baseItem) {
         Timber.d("**** Collection type: %s", baseItem.getCollectionType());
@@ -49,6 +52,11 @@ public class ItemLauncher {
     public Destination.Fragment getUserViewDestination(@Nullable final BaseItemDto baseItem) {
         CollectionType collectionType = baseItem == null ? CollectionType.UNKNOWN : baseItem.getCollectionType();
         if (collectionType == null) collectionType = CollectionType.UNKNOWN;
+
+        JellyflixCollectionType jellyflixCollectionType = userViewsRepository.getValue().getCollectionType(baseItem);
+        if (jellyflixCollectionType.isCustomVideoLibrary()) {
+            return Destinations.INSTANCE.libraryBrowser(baseItem, null);
+        }
 
         switch (collectionType) {
             case MOVIES:

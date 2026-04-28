@@ -431,6 +431,7 @@ public class PlaybackController implements PlaybackControllerNotifiable {
                 mVideoManager.play();
                 mPlaybackState = PlaybackState.PLAYING; // won't get another onPrepared call
                 mFragment.setFadingEnabled(true);
+                mFragment.setPlayPauseActionState(0);
                 startReportLoop();
                 break;
             case BUFFERING:

@@ -306,6 +306,7 @@ class ProfileSelectorRepositoryImpl(
 		val accessToken = requireNotNull(result.authenticationResult.accessToken) {
 			"Profile activation did not return an access token."
 		}
+		val rememberedProfileUserId = activeProfile.id.takeIf { it == result.ownerUserId }
 
 		authenticationStore.getUser(serverId, result.ownerUserId)?.let { owner ->
 			authenticationStore.putUser(
@@ -327,7 +328,7 @@ class ProfileSelectorRepositoryImpl(
 			imageTag = activeProfile.primaryImageTag ?: existingProfileUser.imageTag,
 			accessToken = accessToken,
 			profileSelectorId = result.profileSelectorId,
-			profileSelectorLastProfileUserId = null,
+			profileSelectorLastProfileUserId = rememberedProfileUserId,
 			profileSelectorOwnerUserId = result.ownerUserId,
 		) ?: AuthenticationStoreUser(
 			name = activeProfile.name ?: "Profile",
@@ -335,7 +336,7 @@ class ProfileSelectorRepositoryImpl(
 			imageTag = activeProfile.primaryImageTag,
 			accessToken = accessToken,
 			profileSelectorId = result.profileSelectorId,
-			profileSelectorLastProfileUserId = null,
+			profileSelectorLastProfileUserId = rememberedProfileUserId,
 			profileSelectorOwnerUserId = result.ownerUserId,
 		)
 
@@ -361,7 +362,10 @@ class ProfileSelectorRepositoryImpl(
 		currentDeviceProfileUserId = currentDeviceProfileUserId,
 		profiles = profiles
 			.filter(ProfileSelectorProfileDto::isVisible)
-			.sortedBy(ProfileSelectorProfileDto::displayOrder)
+			.sortedWith(
+				compareByDescending<ProfileSelectorProfileDto> { it.isOwner }
+					.thenBy(ProfileSelectorProfileDto::displayOrder)
+			)
 			.map { profile ->
 				ProfileSelectorUser(
 					id = profile.profileUserId,

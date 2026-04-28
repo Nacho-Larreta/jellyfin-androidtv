@@ -37,7 +37,7 @@ fun Toolbar(
 	modifier: Modifier = Modifier,
 	start: @Composable () -> Unit = { Logo() },
 	center: @Composable () -> Unit = {},
-	end: @Composable () -> Unit = { ToolbarClock() },
+	end: @Composable () -> Unit = {},
 ) {
 	ToolbarLayout(
 		modifier = modifier
@@ -73,12 +73,10 @@ fun ToolbarLayout(
 	val startPlaceables = subcompose("start", content = start).map { it.measure(sideConstraints) }
 	val endPlaceables = subcompose("end", content = end).map { it.measure(sideConstraints) }
 
-	val sideWidth = maxOf(
-		startPlaceables.maxOfOrNull { it.width } ?: 0,
-		endPlaceables.maxOfOrNull { it.width } ?: 0,
-	)
+	val startWidth = startPlaceables.maxOfOrNull { it.width } ?: 0
+	val endWidth = endPlaceables.maxOfOrNull { it.width } ?: 0
 
-	val centerWidth = (constraints.maxWidth - 2 * sideWidth).coerceAtLeast(0)
+	val centerWidth = (constraints.maxWidth - startWidth - endWidth).coerceAtLeast(0)
 	val centerPlaceables = subcompose("center", content = center)
 		.map { it.measure(constraints.copy(minWidth = 0, maxWidth = centerWidth)) }
 
@@ -90,7 +88,12 @@ fun ToolbarLayout(
 
 	layout(constraints.maxWidth, height) {
 		startPlaceables.forEach { it.placeRelative(0, (height - it.height) / 2) }
-		centerPlaceables.forEach { it.place((constraints.maxWidth - it.width) / 2, (height - it.height) / 2) }
+		centerPlaceables.forEach {
+			val centeredX = (constraints.maxWidth - it.width) / 2
+			val maxX = (constraints.maxWidth - endWidth - it.width).coerceAtLeast(startWidth)
+			val x = centeredX.coerceIn(startWidth, maxX)
+			it.place(x, (height - it.height) / 2)
+		}
 		endPlaceables.forEach { it.placeRelative(constraints.maxWidth - it.width, (height - it.height) / 2) }
 	}
 }
@@ -104,7 +107,7 @@ fun ToolbarButtons(
 		modifier = modifier
 			.focusRestorer()
 			.focusGroup(),
-		horizontalArrangement = Arrangement.spacedBy(8.dp),
+		horizontalArrangement = Arrangement.spacedBy(6.dp),
 		verticalAlignment = Alignment.CenterVertically,
 	) {
 		JellyfinTheme(

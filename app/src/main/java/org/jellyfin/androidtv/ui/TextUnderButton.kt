@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import android.util.AttributeSet
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.widget.FrameLayout
 import androidx.annotation.DrawableRes
 import androidx.core.view.isVisible
@@ -39,6 +40,34 @@ class TextUnderButton @JvmOverloads constructor(
 
 	fun setPadding(padding: Int?) {
 		binding.imageButton.setPadding(padding?.dp(context) ?: 0)
+	}
+
+	override fun onTouchEvent(event: MotionEvent): Boolean {
+		return when (event.actionMasked) {
+			MotionEvent.ACTION_DOWN -> {
+				requestFocus()
+				isPressed = true
+				true
+			}
+
+			MotionEvent.ACTION_UP -> {
+				isPressed = false
+				performClick()
+				true
+			}
+
+			MotionEvent.ACTION_CANCEL -> {
+				isPressed = false
+				true
+			}
+
+			else -> super.onTouchEvent(event)
+		}
+	}
+
+	override fun performClick(): Boolean {
+		super.performClick()
+		return true
 	}
 
 	companion object {

@@ -5,6 +5,8 @@ import android.widget.ImageView
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -102,6 +104,7 @@ class CardPresenter(
 					imageType = imageType,
 					staticHeight = staticHeight,
 					uniformAspect = uniformAspect,
+					onClick = { composeView.performClick() },
 				)
 			}
 
@@ -277,6 +280,7 @@ private fun CardViewHolderContent(
 	imageType: ImageType,
 	staticHeight: Int,
 	uniformAspect: Boolean,
+	onClick: () -> Unit,
 ) {
 	val context = LocalContext.current
 	val localDensity = LocalDensity.current
@@ -297,6 +301,11 @@ private fun CardViewHolderContent(
 	}
 
 	val usePreview = displayConfig.overrideShowInfo ?: showInfo
+	val clickModifier = Modifier.clickable(
+		interactionSource = remember(item) { MutableInteractionSource() },
+		indication = null,
+		onClick = onClick,
+	)
 
 	val card = @Composable {
 		ItemCard(
@@ -367,6 +376,7 @@ private fun CardViewHolderContent(
 			},
 			modifier = Modifier
 				.size(size)
+				.then(if (usePreview) Modifier else clickModifier)
 		)
 	}
 
@@ -400,6 +410,7 @@ private fun CardViewHolderContent(
 					)
 				}
 			},
+			modifier = clickModifier,
 		)
 	} else {
 		card()
