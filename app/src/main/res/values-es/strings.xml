@@ -9,6 +9,7 @@
     <string name="chapters">Capítulos</string>
     <string name="lbl_settings">Preferencias</string>
     <string name="lbl_continue_watching">Continuar viendo</string>
+    <string name="lbl_continue_where_left_off">Continuar donde lo dejaste</string>
     <string name="lbl_next_up">Siguiente</string>
     <string name="lbl_on_now">Transmitiendo ahora</string>
     <string name="lbl_views">Vistas</string>

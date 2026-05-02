@@ -18,14 +18,11 @@ import org.jellyfin.androidtv.util.apiclient.parentImages
 import org.jellyfin.androidtv.util.sdk.getFullName
 import org.jellyfin.androidtv.util.sdk.getSubName
 import org.jellyfin.sdk.api.client.ApiClient
-import org.jellyfin.sdk.api.client.extensions.itemsApi
 import org.jellyfin.sdk.api.client.extensions.userLibraryApi
 import org.jellyfin.sdk.model.api.BaseItemDto
 import org.jellyfin.sdk.model.api.BaseItemKind
 import org.jellyfin.sdk.model.api.ImageType
-import org.jellyfin.sdk.model.api.MediaType
 import org.jellyfin.sdk.model.api.request.GetLatestMediaRequest
-import org.jellyfin.sdk.model.api.request.GetResumeItemsRequest
 import timber.log.Timber
 import java.util.Locale
 
@@ -46,12 +43,12 @@ class HomeHeroViewModel(
 
 			runCatching {
 				withContext(Dispatchers.IO) {
-					val resumeItems = api.itemsApi.getResumeItems(createResumeRequest()).content.items
+					val resumeItems = api.loadHomeResumeItems(HERO_ITEM_LIMIT)
 					if (resumeItems.isNotEmpty()) {
 						resumeItems.map {
 							it.toHomeHeroItemData(
 								context = context,
-								eyebrowLabel = context.getString(R.string.lbl_continue_watching),
+								eyebrowLabel = context.getString(R.string.lbl_continue_where_left_off),
 								showResumeProgress = true,
 							)
 						}
@@ -76,15 +73,6 @@ class HomeHeroViewModel(
 			)
 		}
 	}
-
-	private fun createResumeRequest() = GetResumeItemsRequest(
-		limit = HERO_ITEM_LIMIT,
-		fields = ItemRepository.itemFields,
-		imageTypeLimit = 1,
-		enableTotalRecordCount = false,
-		mediaTypes = listOf(MediaType.VIDEO),
-		excludeItemTypes = setOf(BaseItemKind.AUDIO_BOOK),
-	)
 
 	private suspend fun loadLatestHeroItems(): List<BaseItemDto> {
 		val moviesAndEpisodes = api.userLibraryApi.getLatestMedia(

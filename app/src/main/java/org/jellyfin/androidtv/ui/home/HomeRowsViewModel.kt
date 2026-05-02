@@ -20,14 +20,10 @@ import org.jellyfin.androidtv.ui.shared.jellyflixCollectionType
 import org.jellyfin.androidtv.ui.shared.jellyflixLibraryLabel
 import org.jellyfin.androidtv.ui.shared.jellyflixLibraryStyle
 import org.jellyfin.sdk.api.client.ApiClient
-import org.jellyfin.sdk.api.client.extensions.itemsApi
 import org.jellyfin.sdk.api.client.extensions.userLibraryApi
 import org.jellyfin.sdk.model.api.BaseItemDto
-import org.jellyfin.sdk.model.api.BaseItemKind
 import org.jellyfin.sdk.model.api.CollectionType
-import org.jellyfin.sdk.model.api.MediaType
 import org.jellyfin.sdk.model.api.request.GetLatestMediaRequest
-import org.jellyfin.sdk.model.api.request.GetResumeItemsRequest
 
 class HomeRowsViewModel(
 	private val context: Context,
@@ -91,16 +87,7 @@ class HomeRowsViewModel(
 			}
 
 	private suspend fun loadResumeRow(): HomeMediaRowData? {
-		val items = api.itemsApi.getResumeItems(
-			GetResumeItemsRequest(
-				limit = RESUME_ITEM_LIMIT,
-				fields = ItemRepository.itemFields,
-				imageTypeLimit = 1,
-				enableTotalRecordCount = false,
-				mediaTypes = listOf(MediaType.VIDEO),
-				excludeItemTypes = setOf(BaseItemKind.AUDIO_BOOK),
-			)
-		).content.items.orEmpty()
+		val items = api.loadHomeResumeItems(RESUME_ITEM_LIMIT)
 
 		if (items.isEmpty()) return null
 
