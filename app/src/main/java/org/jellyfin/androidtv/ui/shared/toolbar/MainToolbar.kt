@@ -26,11 +26,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.vectorResource
@@ -46,7 +54,6 @@ import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.auth.repository.ProfileSelectorRepository
 import org.jellyfin.androidtv.auth.repository.SessionRepository
 import org.jellyfin.androidtv.auth.repository.UserRepository
-import org.jellyfin.androidtv.data.model.JellyflixCollectionType
 import org.jellyfin.androidtv.data.repository.UserViewsRepository
 import org.jellyfin.androidtv.ui.base.Icon
 import org.jellyfin.androidtv.ui.base.JellyfinTheme
@@ -55,16 +62,16 @@ import org.jellyfin.androidtv.ui.base.Text
 import org.jellyfin.androidtv.ui.base.profileAvatarPalette
 import org.jellyfin.androidtv.ui.base.button.Button
 import org.jellyfin.androidtv.ui.base.button.ButtonDefaults
-import org.jellyfin.androidtv.ui.composable.modifier.overscan
 import org.jellyfin.androidtv.ui.itemhandling.ItemLauncher
 import org.jellyfin.androidtv.ui.navigation.ActivityDestinations
 import org.jellyfin.androidtv.ui.navigation.Destinations
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository
 import org.jellyfin.androidtv.ui.playback.MediaManager
+import org.jellyfin.androidtv.ui.shared.jellyflixNavigationLabel
+import org.jellyfin.androidtv.ui.shared.jellyflixPrimaryNavigationViews
 import org.jellyfin.androidtv.util.apiclient.getUrl
 import org.jellyfin.androidtv.util.apiclient.primaryImage
 import org.jellyfin.sdk.api.client.ApiClient
-import org.jellyfin.sdk.model.api.BaseItemDto
 import org.koin.compose.koinInject
 
 enum class MainToolbarActiveButton {
@@ -78,6 +85,11 @@ enum class MainToolbarActiveButton {
 @Composable
 fun MainToolbar(
 	activeButton: MainToolbarActiveButton = MainToolbarActiveButton.None,
+	downFocusRequester: FocusRequester? = null,
+	onNavigateDown: () -> Unit = {},
+	modifier: Modifier = Modifier,
+	focusRequester: FocusRequester? = null,
+	showFocusVisuals: Boolean = true,
 ) {
 	val userRepository = koinInject<UserRepository>()
 	val api = koinInject<ApiClient>()
@@ -91,6 +103,11 @@ fun MainToolbar(
 		currentUserName = currentUser?.name.orEmpty(),
 		currentUserSeed = currentUser?.id?.toString().orEmpty(),
 		activeButton = activeButton,
+		downFocusRequester = downFocusRequester,
+		onNavigateDown = onNavigateDown,
+		modifier = modifier,
+		externalFocusRequester = focusRequester,
+		showFocusVisuals = showFocusVisuals,
 	)
 }
 
@@ -101,8 +118,13 @@ private fun MainToolbar(
 	currentUserName: String,
 	currentUserSeed: String,
 	activeButton: MainToolbarActiveButton,
+	downFocusRequester: FocusRequester?,
+	onNavigateDown: () -> Unit,
+	modifier: Modifier = Modifier,
+	externalFocusRequester: FocusRequester? = null,
+	showFocusVisuals: Boolean = true,
 ) {
-	val focusRequester = remember { FocusRequester() }
+	val focusRequester = externalFocusRequester ?: remember { FocusRequester() }
 	val navigationRepository = koinInject<NavigationRepository>()
 	val mediaManager = koinInject<MediaManager>()
 	val profileSelectorRepository = koinInject<ProfileSelectorRepository>()
@@ -118,22 +140,18 @@ private fun MainToolbar(
 	}
 	val userViews by remember { userViewsRepository.views }.collectAsState(emptyList())
 	val primaryUserViews = remember(userViews, userViewsRepository) {
-		userViews.filter { it.navigationCollectionType(userViewsRepository).isPrimaryNavigationLibrary }
-			.sortedWith(
-				compareBy<BaseItemDto> { it.navigationCollectionType(userViewsRepository).primaryNavigationOrder }
-					.thenBy { it.name.orEmpty() }
-			)
+		userViews.jellyflixPrimaryNavigationViews(userViewsRepository)
 	}
 	val activeButtonColors = ButtonDefaults.colors(
 		containerColor = Color.Transparent,
 		contentColor = Color.White,
-		focusedContainerColor = Color.White.copy(alpha = 0.16f),
+		focusedContainerColor = if (showFocusVisuals) Color.White.copy(alpha = 0.16f) else Color.Transparent,
 		focusedContentColor = Color.White,
 	)
 	val inactiveButtonColors = ButtonDefaults.colors(
 		containerColor = Color.Transparent,
 		contentColor = Color.White.copy(alpha = 0.66f),
-		focusedContainerColor = Color.White.copy(alpha = 0.16f),
+		focusedContainerColor = if (showFocusVisuals) Color.White.copy(alpha = 0.16f) else Color.Transparent,
 		focusedContentColor = Color.White,
 	)
 	val openProfileSelector = {
@@ -166,16 +184,17 @@ private fun MainToolbar(
 	}
 
 	Box(
-		modifier = Modifier
-			.height(95.dp)
+		modifier = modifier
+			.height(76.dp)
 			.fillMaxWidth()
-			.overscan()
+			.padding(horizontal = 54.dp)
+			.onPreviewKeyEvent { handleToolbarKey(it, onNavigateDown) }
 			.focusRestorer(focusRequester)
 			.focusGroup(),
 	) {
 		Box(
 			modifier = Modifier
-				.width(320.dp)
+				.width(280.dp)
 				.align(Alignment.CenterStart),
 			contentAlignment = Alignment.CenterStart,
 		) {
@@ -189,8 +208,10 @@ private fun MainToolbar(
 		) {
 			ProvideTextStyle(JellyfinTheme.typography.default.copy(fontWeight = FontWeight.SemiBold)) {
 				TvHeaderNavButton(
-					text = stringResource(R.string.lbl_home),
+					text = "Inicio",
 					selected = activeButton == MainToolbarActiveButton.Home,
+					downFocusRequester = downFocusRequester,
+					onNavigateDown = onNavigateDown,
 					onClick = {
 						if (activeButton != MainToolbarActiveButton.Home) {
 							navigationRepository.navigate(
@@ -204,8 +225,10 @@ private fun MainToolbar(
 
 				primaryUserViews.forEach { userView ->
 					TvHeaderNavButton(
-						text = userView.navigationLabel(userViewsRepository),
+						text = userView.jellyflixNavigationLabel(userViewsRepository),
 						selected = false,
+						downFocusRequester = downFocusRequester,
+						onNavigateDown = onNavigateDown,
 						onClick = {
 							navigationRepository.navigate(
 								itemLauncher.getUserViewDestination(userView),
@@ -217,8 +240,10 @@ private fun MainToolbar(
 				}
 
 				TvHeaderNavButton(
-					text = stringResource(R.string.jellyflix_my_list),
+					text = "Mi lista",
 					selected = false,
+					downFocusRequester = downFocusRequester,
+					onNavigateDown = onNavigateDown,
 					onClick = {
 						val defaultLibrary = primaryUserViews.firstOrNull()
 						if (defaultLibrary != null) {
@@ -234,8 +259,10 @@ private fun MainToolbar(
 				)
 
 				TvHeaderNavButton(
-					text = stringResource(R.string.lbl_search),
+					text = "Buscar",
 					selected = activeButton == MainToolbarActiveButton.Search,
+					downFocusRequester = downFocusRequester,
+					onNavigateDown = onNavigateDown,
 					onClick = {
 						if (activeButton != MainToolbarActiveButton.Search) {
 							navigationRepository.navigate(Destinations.search())
@@ -248,7 +275,7 @@ private fun MainToolbar(
 
 		Box(
 			modifier = Modifier
-				.width(260.dp)
+				.width(205.dp)
 				.align(Alignment.CenterEnd),
 			contentAlignment = Alignment.CenterEnd,
 		) {
@@ -258,7 +285,10 @@ private fun MainToolbar(
 				colorSeed = currentUserSeed.ifBlank { currentUserName },
 				colorIndex = profileColorIndex,
 				selected = activeButton == MainToolbarActiveButton.User,
+				downFocusRequester = downFocusRequester,
+				onNavigateDown = onNavigateDown,
 				onClick = openProfileSelector,
+				showFocusVisuals = showFocusVisuals,
 			)
 		}
 	}
@@ -267,22 +297,22 @@ private fun MainToolbar(
 @Composable
 private fun JellyflixWordmark() {
 	Row(
-		horizontalArrangement = Arrangement.spacedBy(12.dp),
+		horizontalArrangement = Arrangement.spacedBy(10.dp),
 		verticalAlignment = Alignment.CenterVertically,
 	) {
 		Icon(
 			imageVector = ImageVector.vectorResource(R.drawable.ic_user),
 			contentDescription = null,
 			tint = Color.White,
-			modifier = Modifier.size(24.dp),
+			modifier = Modifier.size(20.dp),
 		)
 
 		Text(
 			text = "JELLYFIN",
 			color = Color.White,
-			fontSize = 24.sp,
+			fontSize = 22.sp,
 			fontWeight = FontWeight.ExtraBold,
-			letterSpacing = 3.8.sp,
+			letterSpacing = 3.4.sp,
 			maxLines = 1,
 		)
 	}
@@ -293,17 +323,29 @@ private fun TvHeaderNavButton(
 	text: String,
 	selected: Boolean,
 	colors: org.jellyfin.androidtv.ui.base.button.ButtonColors,
+	downFocusRequester: FocusRequester?,
+	onNavigateDown: () -> Unit,
 	onClick: () -> Unit,
 ) {
 	Button(
 		onClick = onClick,
+		modifier = Modifier
+			.focusProperties {
+				downFocusRequester?.let { down = it }
+				onExit = {
+					if (requestedFocusDirection == FocusDirection.Down) {
+						onNavigateDown()
+					}
+				}
+			}
+			.onPreviewKeyEvent { handleToolbarKey(it, onNavigateDown) },
 		shape = RoundedCornerShape(999.dp),
 		colors = colors,
-		contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+		contentPadding = PaddingValues(horizontal = 9.dp, vertical = 5.dp),
 	) {
 		Text(
 			text = text,
-			fontSize = 16.sp,
+			fontSize = 14.sp,
 			fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.SemiBold,
 			maxLines = 1,
 		)
@@ -317,17 +359,30 @@ private fun ProfileSwitcherButton(
 	colorSeed: String,
 	colorIndex: Int?,
 	selected: Boolean,
+	downFocusRequester: FocusRequester?,
+	onNavigateDown: () -> Unit,
 	onClick: () -> Unit,
+	showFocusVisuals: Boolean,
 ) {
 	val colors = ButtonDefaults.colors(
 		containerColor = Color.Transparent,
 		contentColor = Color.White,
-		focusedContainerColor = Color.White.copy(alpha = 0.12f),
+		focusedContainerColor = if (showFocusVisuals) Color.White.copy(alpha = 0.12f) else Color.Transparent,
 		focusedContentColor = Color.White,
 	)
 
 	Button(
 		onClick = onClick,
+		modifier = Modifier
+			.focusProperties {
+				downFocusRequester?.let { down = it }
+				onExit = {
+					if (requestedFocusDirection == FocusDirection.Down) {
+						onNavigateDown()
+					}
+				}
+			}
+			.onPreviewKeyEvent { handleToolbarKey(it, onNavigateDown) },
 		shape = RoundedCornerShape(10.dp),
 		colors = colors,
 		contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
@@ -335,15 +390,15 @@ private fun ProfileSwitcherButton(
 		Text(
 			text = name,
 			color = Color.White.copy(alpha = 0.82f),
-			fontSize = 16.sp,
+			fontSize = 15.sp,
 			fontWeight = FontWeight.SemiBold,
 			textAlign = TextAlign.End,
 			overflow = TextOverflow.Ellipsis,
 			maxLines = 1,
-			modifier = Modifier.width(78.dp),
+			modifier = Modifier.width(68.dp),
 		)
 
-		Spacer(Modifier.width(10.dp))
+		Spacer(Modifier.width(8.dp))
 
 		ProfileAvatarBadge(
 			name = name,
@@ -392,33 +447,25 @@ private fun ProfileAvatarBadge(
 			Text(
 				text = name.trim().firstOrNull()?.uppercaseChar()?.toString().orEmpty(),
 				color = Color.White,
-				fontSize = 22.sp,
+				fontSize = 21.sp,
 				fontWeight = FontWeight.ExtraBold,
 			)
 		}
 	}
 }
 
-@Composable
-private fun BaseItemDto.navigationLabel(
-	userViewsRepository: UserViewsRepository,
-): String = when (navigationCollectionType(userViewsRepository)) {
-	JellyflixCollectionType.Movies -> stringResource(R.string.lbl_movies)
-	JellyflixCollectionType.TvShows -> stringResource(R.string.lbl_series)
-	JellyflixCollectionType.AdultVideos -> "+18"
-	JellyflixCollectionType.Courses -> name.takeUnless { it.isNullOrBlank() } ?: "Cursos"
-	else -> name.orEmpty()
-}
+private fun handleToolbarKey(
+	event: KeyEvent,
+	onNavigateDown: () -> Unit,
+): Boolean {
+	if (event.type != KeyEventType.KeyDown) return false
 
-private fun BaseItemDto.navigationCollectionType(
-	userViewsRepository: UserViewsRepository,
-): JellyflixCollectionType {
-	val type = userViewsRepository.getCollectionType(this)
-	if (type != JellyflixCollectionType.HomeVideos) return type
+	return when {
+		event.key == Key.DirectionDown || event.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN -> {
+			onNavigateDown()
+			true
+		}
 
-	return when (name.orEmpty().trim().lowercase()) {
-		"curso", "cursos", "course", "courses" -> JellyflixCollectionType.Courses
-		"+18", "18+", "adult", "adultos", "adult videos" -> JellyflixCollectionType.AdultVideos
-		else -> type
+		else -> false
 	}
 }

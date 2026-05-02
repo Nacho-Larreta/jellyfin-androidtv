@@ -5,8 +5,12 @@ import org.jellyfin.sdk.model.api.BaseItemDto
 
 data class HomeHeroItemData(
 	val baseItem: BaseItemDto,
+	val eyebrowLabel: String,
 	val title: String,
 	val subtitle: String?,
+	val ratingLabel: String?,
+	val metadataParts: List<String>,
+	val remainingLabel: String?,
 	val overview: String?,
 	val backdrop: JellyfinImage?,
 	val poster: JellyfinImage?,

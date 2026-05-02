@@ -19,12 +19,15 @@ import org.jellyfin.androidtv.util.sdk.getFullName
 import org.jellyfin.androidtv.util.sdk.getSubName
 import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.extensions.itemsApi
+import org.jellyfin.sdk.api.client.extensions.userLibraryApi
 import org.jellyfin.sdk.model.api.BaseItemDto
 import org.jellyfin.sdk.model.api.BaseItemKind
 import org.jellyfin.sdk.model.api.ImageType
 import org.jellyfin.sdk.model.api.MediaType
+import org.jellyfin.sdk.model.api.request.GetLatestMediaRequest
 import org.jellyfin.sdk.model.api.request.GetResumeItemsRequest
 import timber.log.Timber
+import java.util.Locale
 
 class HomeHeroViewModel(
 	private val context: Context,
@@ -43,8 +46,24 @@ class HomeHeroViewModel(
 
 			runCatching {
 				withContext(Dispatchers.IO) {
-					val response = api.itemsApi.getResumeItems(createResumeRequest()).content
-					response.items.map { it.toHomeHeroItemData(context) }
+					val resumeItems = api.itemsApi.getResumeItems(createResumeRequest()).content.items
+					if (resumeItems.isNotEmpty()) {
+						resumeItems.map {
+							it.toHomeHeroItemData(
+								context = context,
+								eyebrowLabel = context.getString(R.string.lbl_continue_watching),
+								showResumeProgress = true,
+							)
+						}
+					} else {
+						loadLatestHeroItems().map {
+							it.toHomeHeroItemData(
+								context = context,
+								eyebrowLabel = context.getString(R.string.lbl_latest),
+								showResumeProgress = false,
+							)
+						}
+					}
 				}
 			}.fold(
 				onSuccess = { items ->
@@ -67,13 +86,42 @@ class HomeHeroViewModel(
 		excludeItemTypes = setOf(BaseItemKind.AUDIO_BOOK),
 	)
 
-	private fun BaseItemDto.toHomeHeroItemData(context: Context): HomeHeroItemData {
+	private suspend fun loadLatestHeroItems(): List<BaseItemDto> {
+		val moviesAndEpisodes = api.userLibraryApi.getLatestMedia(
+			createLatestRequest(listOf(BaseItemKind.MOVIE, BaseItemKind.EPISODE))
+		).content
+
+		return moviesAndEpisodes.ifEmpty {
+			api.userLibraryApi.getLatestMedia(
+				createLatestRequest(listOf(BaseItemKind.VIDEO))
+			).content
+		}
+	}
+
+	private fun createLatestRequest(includeItemTypes: List<BaseItemKind>) = GetLatestMediaRequest(
+		limit = HERO_ITEM_LIMIT,
+		fields = ItemRepository.itemFields,
+		imageTypeLimit = 1,
+		groupItems = true,
+		includeItemTypes = includeItemTypes,
+	)
+
+	private fun BaseItemDto.toHomeHeroItemData(
+		context: Context,
+		eyebrowLabel: String,
+		showResumeProgress: Boolean,
+	): HomeHeroItemData {
 		val playbackTicks = userData?.playbackPositionTicks ?: 0L
 		val runtimeTicks = runTimeTicks ?: 0L
 		val resumeMillis = playbackTicks / TICKS_PER_MILLISECOND
-		val remainingMinutes = ((runtimeTicks - playbackTicks) / TICKS_PER_MINUTE)
-			.coerceAtLeast(0)
-			.toInt()
+		val hasResumeProgress = showResumeProgress && playbackTicks > 0L && runtimeTicks > 0L
+		val remainingMinutes = if (hasResumeProgress) {
+			((runtimeTicks - playbackTicks) / TICKS_PER_MINUTE)
+				.coerceAtLeast(0)
+				.toInt()
+		} else {
+			0
+		}
 		val resumeLabel = if (resumeMillis > 0) {
 			context.getString(R.string.lbl_resume_from, TimeUtils.formatMillis(resumeMillis))
 		} else {
@@ -82,15 +130,44 @@ class HomeHeroViewModel(
 
 		return HomeHeroItemData(
 			baseItem = this,
+			eyebrowLabel = eyebrowLabel,
 			title = getFullName(context).orEmpty(),
 			subtitle = buildSubtitle(context, remainingMinutes),
+			ratingLabel = communityRating?.let { rating -> String.format(Locale.US, "%.1f/10", rating) },
+			metadataParts = buildMetadataParts(),
+			remainingLabel = remainingMinutes
+				.takeIf { hasResumeProgress && it > 0 }
+				?.let { minutes ->
+					context.getString(
+						R.string.lbl_remaining_minutes,
+						context.resources.getQuantityString(R.plurals.minutes, minutes, minutes)
+					)
+				},
 			overview = overview,
 			backdrop = itemBackdropImages.firstOrNull() ?: parentBackdropImages.firstOrNull(),
 			poster = itemImages[ImageType.PRIMARY] ?: parentImages[ImageType.PRIMARY],
 			logo = itemImages[ImageType.LOGO] ?: parentImages[ImageType.LOGO],
-			progress = if (runtimeTicks > 0L) (playbackTicks.toFloat() / runtimeTicks).coerceIn(0f, 1f) else 0f,
+			progress = if (hasResumeProgress) (playbackTicks.toFloat() / runtimeTicks).coerceIn(0f, 1f) else 0f,
 			resumeLabel = resumeLabel,
 		)
+	}
+
+	private fun BaseItemDto.buildMetadataParts(): List<String> = listOfNotNull(
+		productionYear?.toString(),
+		officialRating,
+		runTimeTicks?.let(::formatRuntime),
+	).filter { it.isNotBlank() }
+
+	private fun formatRuntime(runtimeTicks: Long): String {
+		val totalMinutes = (runtimeTicks / TICKS_PER_MINUTE).coerceAtLeast(0)
+		val hours = totalMinutes / 60
+		val minutes = totalMinutes % 60
+
+		return when {
+			hours > 0 && minutes > 0 -> "${hours}h ${minutes}m"
+			hours > 0 -> "${hours}h"
+			else -> "${minutes}m"
+		}
 	}
 
 	private fun BaseItemDto.buildSubtitle(context: Context, remainingMinutes: Int): String? {
