@@ -1,13 +1,14 @@
 package org.jellyfin.androidtv.ui.search.composable
 
-import androidx.compose.foundation.border
+import android.view.KeyEvent as AndroidKeyEvent
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -16,8 +17,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -28,6 +33,7 @@ import org.jellyfin.androidtv.ui.base.Icon
 import org.jellyfin.androidtv.ui.base.JellyfinTheme
 import org.jellyfin.androidtv.ui.base.LocalTextStyle
 import org.jellyfin.androidtv.ui.base.ProvideTextStyle
+import org.jellyfin.androidtv.ui.base.Text
 
 @Composable
 fun SearchTextInput(
@@ -35,9 +41,35 @@ fun SearchTextInput(
 	onQueryChange: (query: String) -> Unit,
 	onQuerySubmit: () -> Unit,
 	modifier: Modifier = Modifier,
+	placeholder: String = "",
+	canFocus: Boolean = true,
+	forceFocused: Boolean = false,
+	showKeyboardOnFocus: Boolean = true,
+	onKeyPressed: (keyCode: Int) -> Boolean = { false },
 ) {
 	val interactionSource = remember { MutableInteractionSource() }
-	val focused by interactionSource.collectIsFocusedAsState()
+	val inputFocused by interactionSource.collectIsFocusedAsState()
+	val focused = forceFocused || (canFocus && inputFocused)
+
+	fun isTvNavigationKey(keyCode: Int): Boolean =
+		keyCode == AndroidKeyEvent.KEYCODE_BACK ||
+			keyCode == AndroidKeyEvent.KEYCODE_DPAD_UP ||
+			keyCode == AndroidKeyEvent.KEYCODE_DPAD_DOWN ||
+			keyCode == AndroidKeyEvent.KEYCODE_DPAD_LEFT ||
+			keyCode == AndroidKeyEvent.KEYCODE_DPAD_RIGHT ||
+			keyCode == AndroidKeyEvent.KEYCODE_DPAD_CENTER ||
+			keyCode == AndroidKeyEvent.KEYCODE_ENTER ||
+			keyCode == AndroidKeyEvent.KEYCODE_NUMPAD_ENTER
+
+	fun handleTvNavigation(event: androidx.compose.ui.input.key.KeyEvent): Boolean {
+		val keyCode = event.nativeKeyEvent.keyCode
+
+		return when (event.type) {
+			KeyEventType.KeyDown -> isTvNavigationKey(keyCode) && onKeyPressed(keyCode)
+			KeyEventType.KeyUp -> isTvNavigationKey(keyCode)
+			else -> false
+		}
+	}
 
 	val color = when {
 		focused -> JellyfinTheme.colorScheme.inputFocused to JellyfinTheme.colorScheme.onInputFocused
@@ -47,13 +79,16 @@ fun SearchTextInput(
 	ProvideTextStyle(
 		LocalTextStyle.current.copy(
 			color = color.second,
-			fontSize = 16.sp,
+			fontSize = 20.sp,
 		)
 	) {
 		BasicTextField(
-			modifier = modifier,
+			modifier = modifier
+				.onPreviewKeyEvent(::handleTvNavigation)
+				.focusProperties { this.canFocus = canFocus },
 			value = query,
 			singleLine = true,
+			readOnly = !canFocus,
 			interactionSource = interactionSource,
 			onValueChange = { onQueryChange(it) },
 			keyboardActions = KeyboardActions { onQuerySubmit() },
@@ -61,10 +96,7 @@ fun SearchTextInput(
 				keyboardType = KeyboardType.Text,
 				imeAction = ImeAction.Search,
 				autoCorrectEnabled = true,
-				// Note: Compose does not support a press to open functionality (yet?) or programmatic keyboard activation so we can only
-				// use the show on focus behavior. Unfortunately this does not work great with some vendors like Amazon.
-				// In addition, this boolean cannot be unset with the (stateless) BasicTextField implementation we're using
-				showKeyboardOnFocus = true,
+				showKeyboardOnFocus = showKeyboardOnFocus,
 			),
 			textStyle = LocalTextStyle.current,
 			cursorBrush = SolidColor(color.first),
@@ -72,12 +104,25 @@ fun SearchTextInput(
 				Row(
 					verticalAlignment = Alignment.CenterVertically,
 					modifier = Modifier
-						.border(2.dp, color.first, RoundedCornerShape(percent = 30))
-						.padding(12.dp)
+						.padding(horizontal = 22.dp, vertical = 18.dp)
 				) {
-					Icon(ImageVector.vectorResource(R.drawable.ic_search), contentDescription = null)
-					Spacer(Modifier.width(12.dp))
-					innerTextField()
+					Icon(
+						ImageVector.vectorResource(R.drawable.ic_search),
+						contentDescription = null,
+						modifier = Modifier.size(28.dp),
+					)
+					Spacer(Modifier.width(16.dp))
+					Box(modifier = Modifier.weight(1f)) {
+						if (query.isEmpty() && placeholder.isNotBlank()) {
+							Text(
+								text = placeholder,
+								color = color.second.copy(alpha = 0.42f),
+								fontSize = 20.sp,
+								maxLines = 1,
+							)
+						}
+						innerTextField()
+					}
 				}
 			}
 		)

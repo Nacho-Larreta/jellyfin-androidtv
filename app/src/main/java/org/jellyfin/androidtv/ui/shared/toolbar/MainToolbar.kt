@@ -188,7 +188,7 @@ private fun MainToolbar(
 			.height(76.dp)
 			.fillMaxWidth()
 			.padding(horizontal = 54.dp)
-			.onPreviewKeyEvent { handleToolbarKey(it, onNavigateDown) }
+			.onPreviewKeyEvent { handleToolbarKey(it, downFocusRequester, onNavigateDown) }
 			.focusRestorer(focusRequester)
 			.focusGroup(),
 	) {
@@ -338,7 +338,7 @@ private fun TvHeaderNavButton(
 					}
 				}
 			}
-			.onPreviewKeyEvent { handleToolbarKey(it, onNavigateDown) },
+			.onPreviewKeyEvent { handleToolbarKey(it, downFocusRequester, onNavigateDown) },
 		shape = RoundedCornerShape(999.dp),
 		colors = colors,
 		contentPadding = PaddingValues(horizontal = 9.dp, vertical = 5.dp),
@@ -382,7 +382,7 @@ private fun ProfileSwitcherButton(
 					}
 				}
 			}
-			.onPreviewKeyEvent { handleToolbarKey(it, onNavigateDown) },
+			.onPreviewKeyEvent { handleToolbarKey(it, downFocusRequester, onNavigateDown) },
 		shape = RoundedCornerShape(10.dp),
 		colors = colors,
 		contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
@@ -456,6 +456,7 @@ private fun ProfileAvatarBadge(
 
 private fun handleToolbarKey(
 	event: KeyEvent,
+	downFocusRequester: FocusRequester?,
 	onNavigateDown: () -> Unit,
 ): Boolean {
 	if (event.type != KeyEventType.KeyDown) return false
@@ -463,6 +464,7 @@ private fun handleToolbarKey(
 	return when {
 		event.key == Key.DirectionDown || event.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN -> {
 			onNavigateDown()
+			runCatching { downFocusRequester?.requestFocus() }
 			true
 		}
 

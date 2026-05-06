@@ -14,6 +14,13 @@ import org.jellyfin.sdk.model.api.BaseItemKind
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 
+data class SearchDiscoveryState(
+	val history: List<SearchHistoryEntry> = emptyList(),
+	val genres: List<SearchExploreItem> = emptyList(),
+	val collections: List<SearchExploreItem> = emptyList(),
+	val loading: Boolean = false,
+)
+
 class SearchViewModel(
 	private val searchRepository: SearchRepository
 ) : ViewModel() {
@@ -42,10 +49,71 @@ class SearchViewModel(
 
 	private var previousQuery: String? = null
 
+	private var previousRecordedQuery: String? = null
+
 	private val _searchResultsFlow = MutableStateFlow<Collection<SearchResultGroup>>(emptyList())
 	val searchResultsFlow = _searchResultsFlow.asStateFlow()
 
+	private val _searchDiscoveryFlow = MutableStateFlow(SearchDiscoveryState(loading = true))
+	val searchDiscoveryFlow = _searchDiscoveryFlow.asStateFlow()
+
+	init {
+		refreshDiscovery()
+	}
+
+	fun refreshDiscovery() {
+		viewModelScope.launch {
+			val currentState = _searchDiscoveryFlow.value
+			_searchDiscoveryFlow.value = currentState.copy(loading = true)
+
+			val history = async { searchRepository.getSearchHistory().getOrNull() }
+			val genres = async { searchRepository.getGenres().getOrNull() }
+			val collections = async { searchRepository.getCollections().getOrNull() }
+
+			_searchDiscoveryFlow.value = SearchDiscoveryState(
+				history = history.await() ?: currentState.history,
+				genres = genres.await() ?: currentState.genres,
+				collections = collections.await() ?: currentState.collections,
+				loading = false,
+			)
+		}
+	}
+
+	fun clearSearchHistory() {
+		viewModelScope.launch {
+			searchRepository.clearSearchHistory()
+			_searchDiscoveryFlow.value = _searchDiscoveryFlow.value.copy(history = emptyList())
+		}
+	}
+
 	fun searchImmediately(query: String) = searchDebounced(query, 0.milliseconds)
+
+	fun browseGenre(genre: String): Boolean {
+		val trimmed = genre.trim()
+		val stateKey = "genre:$trimmed"
+		if (stateKey == previousQuery) return false
+		previousQuery = stateKey
+
+		searchJob?.cancel()
+
+		if (trimmed.isBlank()) {
+			_searchResultsFlow.value = emptyList()
+			return true
+		}
+
+		searchJob = viewModelScope.launch {
+			_searchResultsFlow.value = groups.map { (stringRes, itemKinds) ->
+				async {
+					val result = searchRepository.searchByGenre(trimmed, itemKinds)
+					val items = result.getOrNull().orEmpty()
+
+					SearchResultGroup(stringRes, items)
+				}
+			}.awaitAll()
+		}
+
+		return true
+	}
 
 	fun searchDebounced(query: String, debounce: Duration = debounceDuration): Boolean {
 		val trimmed = query.trim()
@@ -61,6 +129,7 @@ class SearchViewModel(
 
 		searchJob = viewModelScope.launch {
 			delay(debounce)
+			recordSearch(trimmed)
 
 			_searchResultsFlow.value = groups.map { (stringRes, itemKinds) ->
 				async {
@@ -73,5 +142,15 @@ class SearchViewModel(
 		}
 
 		return true
+	}
+
+	private fun recordSearch(searchTerm: String) {
+		if (searchTerm == previousRecordedQuery || searchTerm.isBlank()) return
+
+		previousRecordedQuery = searchTerm
+		viewModelScope.launch {
+			searchRepository.recordSearchHistory(searchTerm)
+			refreshDiscovery()
+		}
 	}
 }
