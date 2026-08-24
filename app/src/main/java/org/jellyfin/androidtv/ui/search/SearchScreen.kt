@@ -2,20 +2,24 @@ package org.jellyfin.androidtv.ui.search
 
 import android.view.KeyEvent as AndroidKeyEvent
 import android.widget.ImageView
+import androidx.annotation.StringRes
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -37,11 +41,13 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusTarget
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -52,8 +58,18 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.vectorResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -154,6 +170,18 @@ private val GENRE_COLORS = listOf(
 private const val GENRE_COLUMN_COUNT = 4
 private const val TRENDING_COLUMN_COUNT = 6
 
+private fun Modifier.searchControlSemantics(
+	description: String,
+	selectionState: Boolean?,
+	actionLabel: String,
+	onActivate: () -> Boolean,
+): Modifier = semantics(mergeDescendants = true) {
+	contentDescription = description
+	role = Role.Button
+	selectionState?.let { selected = it }
+	onClick(label = actionLabel, action = onActivate)
+}
+
 private fun rowCount(itemCount: Int, columns: Int) =
 	if (itemCount == 0) 0 else (itemCount + columns - 1) / columns
 
@@ -201,6 +229,7 @@ private fun isSearchNavigationKeyCode(keyCode: Int): Boolean =
 	}
 
 @Composable
+@OptIn(ExperimentalComposeUiApi::class, ExperimentalLayoutApi::class)
 internal fun SearchScreen(
 	initialQuery: String,
 	onBackPressedHandlerChange: (() -> Boolean) -> Unit = {},
@@ -212,12 +241,18 @@ internal fun SearchScreen(
 	val backgroundService = koinInject<BackgroundService>()
 	val searchResults by viewModel.searchResultsFlow.collectAsState()
 	val discovery by viewModel.searchDiscoveryFlow.collectAsState()
+	val focusManager = LocalFocusManager.current
+	val keyboardController = LocalSoftwareKeyboardController.current
+	val view = LocalView.current
 	val toolbarFocusRequester = remember { FocusRequester() }
 	val contentFocusRequester = remember { FocusRequester() }
 	val listState = rememberLazyListState()
 	val density = LocalDensity.current
+	val imeVisible = WindowInsets.isImeVisible || WindowInsets.ime.getBottom(density) > 0
 	var query by rememberSaveable { mutableStateOf(initialQuery) }
-	var inputEditing by rememberSaveable { mutableStateOf(false) }
+	var inputBoundaryState by remember { mutableStateOf(SearchInputBoundaryState()) }
+	val inputEditing = inputBoundaryState.editing
+	var pendingBrowseNavigation by remember { mutableStateOf(false) }
 	var selection by remember {
 		mutableStateOf<SearchSelection>(
 			if (initialQuery.isBlank()) SearchSelection.Input else SearchSelection.TopResult
@@ -275,7 +310,7 @@ internal fun SearchScreen(
 		.filter { group -> group.items.isNotEmpty() }
 	val totalResults = groups.sumOf { group -> group.items.size }
 	val filters = buildList {
-		add(SearchFilter("Todo", null, totalResults))
+		add(SearchFilter(context.getString(R.string.search_filter_all), null, totalResults))
 		groups.forEach { group ->
 			add(SearchFilter(context.getString(group.labelRes), group.sourceIndex, group.items.size))
 		}
@@ -294,6 +329,17 @@ internal fun SearchScreen(
 		append("|collections:").append(trendingSearches.joinToString(",") { it.exploreItem.id ?: it.title })
 		groups.forEach { group ->
 			append("|g:").append(group.sourceIndex).append(':').append(group.items.joinToString(",") { it.id.toString() })
+		}
+	}
+
+	fun setInputEditing(editing: Boolean) {
+		inputBoundaryState = SearchInputBoundaryReducer.reduce(
+			state = inputBoundaryState,
+			event = SearchInputBoundaryEvent.EditingChanged(editing),
+		).state
+		if (!editing) {
+			keyboardController?.hide()
+			focusManager.clearFocus(force = true)
 		}
 	}
 
@@ -353,15 +399,25 @@ internal fun SearchScreen(
 			else -> SearchSelection.Input
 		}
 
-	fun firstBrowseSelection(): SearchSelection =
-		if (query.isBlank()) {
-			firstBlankSelection()
-		} else {
-			when {
-				filters.size > 1 -> SearchSelection.Filter(selectedFilterIndex)
-				else -> firstResultSelection()
-			}
-		}
+	fun selectionForBrowseDestination(destination: SearchBrowseDestination): SearchSelection = when (destination) {
+		SearchBrowseDestination.Input -> SearchSelection.Input
+		SearchBrowseDestination.BlankContent -> firstBlankSelection()
+		SearchBrowseDestination.Filter -> SearchSelection.Filter(selectedFilterIndex)
+		SearchBrowseDestination.TopResult -> SearchSelection.TopResult
+		SearchBrowseDestination.Result -> SearchSelection.RowItem(0, 0)
+	}
+
+	fun firstBrowseSelection(): SearchSelection = selectionForBrowseDestination(
+		firstSearchBrowseDestination(
+			query = query,
+			blankBrowseTargetAvailable = blankRows.isNotEmpty(),
+			filterCount = filters.size,
+			allFilterSelected = selectedFilterIndex == 0,
+			topResultAvailable = topResult != null,
+			resultGroupAvailable = groups.isNotEmpty(),
+			resultCount = totalResults,
+		)
+	)
 
 	fun normalizeSelection(target: SearchSelection): SearchSelection =
 		when (target) {
@@ -406,7 +462,10 @@ internal fun SearchScreen(
 
 	fun select(target: SearchSelection): Boolean {
 		val normalized = normalizeSelection(target)
-		if (normalized != SearchSelection.Input) inputEditing = false
+		if (normalized != SearchSelection.Input) {
+			pendingBrowseNavigation = false
+			setInputEditing(false)
+		}
 		selection = normalized
 		when (normalized) {
 			SearchSelection.Toolbar -> runCatching { toolbarFocusRequester.requestFocus() }
@@ -424,10 +483,32 @@ internal fun SearchScreen(
 		}
 	}
 
+	fun hasBrowseTarget(): Boolean = hasSearchBrowseTarget(
+		query = query,
+		blankBrowseTargetAvailable = blankRows.isNotEmpty(),
+		resultCount = totalResults,
+	)
+
+	fun leaveInputThroughBoundary(): Boolean {
+		val result = SearchInputBoundaryReducer.reduce(
+			state = inputBoundaryState,
+			event = SearchInputBoundaryEvent.BackPressed(hasBrowseTarget()),
+		)
+		inputBoundaryState = result.state
+
+		return when (result.effect) {
+			SearchInputBoundaryEffect.FocusBrowse -> select(firstBrowseSelection())
+			SearchInputBoundaryEffect.KeepInputFocus -> {
+				pendingBrowseNavigation = true
+				true
+			}
+			SearchInputBoundaryEffect.None -> true
+		}
+	}
+
 	fun handleBack(): Boolean =
 		if (selection == SearchSelection.Input && inputEditing) {
-			inputEditing = false
-			true
+			leaveInputThroughBoundary()
 		} else if (selection != SearchSelection.Toolbar) {
 			select(SearchSelection.Toolbar)
 		} else {
@@ -437,6 +518,7 @@ internal fun SearchScreen(
 	fun submitShortcutSearch(shortcutQuery: String): Boolean {
 		query = shortcutQuery
 		selectedFilterIndex = 0
+		pendingBrowseNavigation = false
 		pendingShortcutQuery = shortcutQuery
 		viewModel.searchImmediately(shortcutQuery)
 		// Keep the keyboard closed while results load; content focus is restored once results arrive.
@@ -447,6 +529,7 @@ internal fun SearchScreen(
 	fun submitGenreBrowse(genre: SearchGenre): Boolean {
 		query = genre.label
 		selectedFilterIndex = 0
+		pendingBrowseNavigation = false
 		pendingShortcutQuery = genre.query
 		viewModel.browseGenre(genre.query)
 		// Keep the keyboard closed while genre results load; content focus is restored once results arrive.
@@ -499,6 +582,62 @@ internal fun SearchScreen(
 			}
 		}
 
+	fun activateFocusedControl(): Boolean = when (normalizeSelection(selection)) {
+		SearchSelection.Input -> {
+			setInputEditing(true)
+			true
+		}
+		else -> activateSelection()
+	}
+
+	fun resultCountDescription(count: Int): String = context.resources.getQuantityString(
+		R.plurals.search_result_count,
+		count,
+		count,
+	)
+
+	fun titleCountDescription(count: Int): String = context.resources.getQuantityString(
+		R.plurals.search_title_count,
+		count,
+		count,
+	)
+
+	fun selectionDescription(target: SearchSelection): String? = when (val normalized = normalizeSelection(target)) {
+		SearchSelection.Toolbar,
+		SearchSelection.Input -> null
+		is SearchSelection.RecentSearch -> context.getString(
+			R.string.search_a11y_recent_search,
+			recentSearches[normalized.index].label,
+		)
+		SearchSelection.ClearHistory -> context.getString(R.string.search_clear_history)
+		is SearchSelection.Genre -> {
+			val genre = genreShortcuts[normalized.index]
+			context.getString(R.string.search_a11y_genre, genre.label, titleCountDescription(genre.count))
+		}
+		is SearchSelection.Trending -> {
+			val trend = trendingSearches[normalized.index]
+			context.getString(R.string.search_a11y_collection, trend.title)
+		}
+		is SearchSelection.Filter -> {
+			val filter = filters[normalized.index]
+			context.getString(R.string.search_a11y_filter, filter.label, resultCountDescription(filter.count))
+		}
+		SearchSelection.TopResult -> {
+			val item = topResult?.let(::searchRowItem)
+			context.getString(
+				R.string.search_a11y_top_result,
+				item?.getCardName(context) ?: item?.getName(context).orEmpty(),
+			)
+		}
+		is SearchSelection.RowItem -> {
+			val item = visibleGroups[normalized.rowIndex].items[normalized.itemIndex].let(::searchRowItem)
+			context.getString(
+				R.string.search_a11y_result,
+				item.getCardName(context) ?: item.getName(context).orEmpty(),
+			)
+		}
+	}
+
 	fun moveBlankHorizontal(target: SearchSelection, delta: Int): Boolean {
 		val (rowIndex, column) = blankRowPosition(target) ?: return false
 		val row = blankRows.getOrNull(rowIndex) ?: return false
@@ -536,8 +675,14 @@ internal fun SearchScreen(
 		when (val target = normalizeSelection(selection)) {
 			SearchSelection.Toolbar -> if (delta > 0) select(firstBrowseSelection()) else true
 			SearchSelection.Input -> if (delta > 0) {
-				if (query.isBlank()) select(firstBlankSelection())
-				else when {
+				if (query.isBlank()) {
+					if (blankRows.isEmpty()) {
+					pendingBrowseNavigation = true
+						true
+					} else {
+						select(firstBlankSelection())
+					}
+				} else when {
 					filters.size > 1 -> select(SearchSelection.Filter(selectedFilterIndex))
 					else -> select(firstResultSelection())
 				}
@@ -594,17 +739,17 @@ internal fun SearchScreen(
 			return when (keyCode) {
 				AndroidKeyEvent.KEYCODE_BACK -> handleBack()
 				AndroidKeyEvent.KEYCODE_DPAD_UP -> {
-					inputEditing = false
+					setInputEditing(false)
 					moveVertical(-1)
 				}
 				AndroidKeyEvent.KEYCODE_DPAD_DOWN -> {
-					inputEditing = false
+					setInputEditing(false)
 					moveVertical(1)
 				}
 				AndroidKeyEvent.KEYCODE_DPAD_CENTER,
 				AndroidKeyEvent.KEYCODE_ENTER,
 				AndroidKeyEvent.KEYCODE_NUMPAD_ENTER -> {
-					inputEditing = true
+					setInputEditing(true)
 					true
 				}
 				else -> false
@@ -619,7 +764,7 @@ internal fun SearchScreen(
 			AndroidKeyEvent.KEYCODE_DPAD_DOWN -> moveVertical(1)
 			AndroidKeyEvent.KEYCODE_DPAD_CENTER,
 			AndroidKeyEvent.KEYCODE_ENTER,
-			AndroidKeyEvent.KEYCODE_NUMPAD_ENTER -> activateSelection()
+			AndroidKeyEvent.KEYCODE_NUMPAD_ENTER -> activateFocusedControl()
 			else -> false
 		}
 	}
@@ -658,16 +803,17 @@ internal fun SearchScreen(
 	fun contentListIndex(target: SearchSelection): Int =
 		if (query.isBlank()) blankContentIndex(target) else resultContentIndex(target)
 
-	val currentBackHandler by rememberUpdatedState(newValue = ::handleBack)
-	val currentKeyHandler by rememberUpdatedState(newValue = ::handleKey)
+	val currentBackHandler = rememberUpdatedState(newValue = { handleBack() })
+	val currentKeyHandler = rememberUpdatedState(newValue = { keyCode: Int -> handleKey(keyCode) })
 
 	SideEffect {
-		onBackPressedHandlerChange { currentBackHandler() }
-		onKeyPressedHandlerChange { keyCode -> currentKeyHandler(keyCode) }
+		onBackPressedHandlerChange { currentBackHandler.value() }
+		onKeyPressedHandlerChange { keyCode -> currentKeyHandler.value(keyCode) }
 	}
 
 	LaunchedEffect(Unit) {
 		if (initialQuery.isNotBlank()) {
+			pendingShortcutQuery = initialQuery
 			viewModel.searchImmediately(initialQuery)
 		}
 		select(if (initialQuery.isBlank()) SearchSelection.Input else SearchSelection.TopResult)
@@ -675,12 +821,31 @@ internal fun SearchScreen(
 
 	LaunchedEffect(contentSignature) {
 		selectedFilterIndex = selectedFilterIndex.coerceIn(0, filters.lastIndex.coerceAtLeast(0))
-		val normalizedSelection = if (pendingShortcutQuery == query && totalResults > 0) {
-			pendingShortcutQuery = null
-			firstResultSelection()
-		} else {
-			if (pendingShortcutQuery != null && pendingShortcutQuery != query) pendingShortcutQuery = null
-			normalizeSelection(selection)
+		val pendingBrowseResolution = resolvePendingSearchBrowseNavigation(
+			pending = pendingBrowseNavigation,
+			boundaryState = inputBoundaryState,
+			query = query,
+			blankBrowseTargetAvailable = blankRows.isNotEmpty(),
+			filterCount = filters.size,
+			allFilterSelected = selectedFilterIndex == 0,
+			topResultAvailable = topResult != null,
+			resultGroupAvailable = groups.isNotEmpty(),
+			resultCount = totalResults,
+		)
+		val normalizedSelection = when {
+			pendingBrowseResolution != null -> {
+				inputBoundaryState = pendingBrowseResolution.boundaryState
+				pendingBrowseNavigation = pendingBrowseResolution.pending
+				selectionForBrowseDestination(pendingBrowseResolution.destination)
+			}
+			pendingShortcutQuery == query && totalResults > 0 -> {
+				pendingShortcutQuery = null
+				firstResultSelection()
+			}
+			else -> {
+				if (pendingShortcutQuery != null && pendingShortcutQuery != query) pendingShortcutQuery = null
+				normalizeSelection(selection)
+			}
 		}
 
 		if (normalizedSelection != selection) {
@@ -715,11 +880,30 @@ internal fun SearchScreen(
 
 	LaunchedEffect(selection) {
 		if (!inputEditing) requestFocusForSelection(selection)
+		selectionDescription(selection)?.let(view::announceForAccessibility)
 	}
 
 	LaunchedEffect(inputEditing) {
 		if (!inputEditing && selection != SearchSelection.Toolbar) {
+			focusManager.clearFocus(force = true)
 			runCatching { contentFocusRequester.requestFocus() }
+		}
+	}
+
+	LaunchedEffect(inputEditing, imeVisible) {
+		val result = SearchInputBoundaryReducer.reduce(
+			state = inputBoundaryState,
+			event = SearchInputBoundaryEvent.ImeVisibilityChanged(
+				visible = imeVisible,
+				browseTargetAvailable = hasBrowseTarget(),
+			),
+		)
+		if (result.state != inputBoundaryState) inputBoundaryState = result.state
+
+		when (result.effect) {
+			SearchInputBoundaryEffect.FocusBrowse -> select(firstBrowseSelection())
+		SearchInputBoundaryEffect.KeepInputFocus -> pendingBrowseNavigation = true
+			SearchInputBoundaryEffect.None -> Unit
 		}
 	}
 
@@ -745,14 +929,17 @@ internal fun SearchScreen(
 			onQueryChange = {
 				query = it
 				selectedFilterIndex = 0
+				pendingBrowseNavigation = false
 				viewModel.searchDebounced(it)
 			},
 			onQuerySubmit = {
-				inputEditing = false
+				setInputEditing(false)
+				pendingBrowseNavigation = false
+				pendingShortcutQuery = query
 				viewModel.searchImmediately(query)
-				select(firstResultSelection())
+				select(SearchSelection.Input)
 			},
-			onEditingChange = { inputEditing = it },
+			onEditingChange = ::setInputEditing,
 			onMoveFromInput = { delta -> moveVertical(delta) },
 			showKeyboardOnFocus = false,
 		)
@@ -764,7 +951,7 @@ internal fun SearchScreen(
 				.focusRequester(contentFocusRequester)
 				.onPreviewKeyEvent(::handleComposeKey)
 				.onKeyEvent(::handleComposeKey)
-				.focusable(),
+				.focusTarget(),
 		) {
 			LazyColumn(
 				state = listState,
@@ -777,6 +964,10 @@ internal fun SearchScreen(
 							filters = filters,
 							selectedFilterIndex = selectedFilterIndex,
 							focusedFilterIndex = (selection as? SearchSelection.Filter)?.index,
+							onActivate = { index ->
+								select(SearchSelection.Filter(index))
+								activateSelection()
+							},
 						)
 					} else {
 						Spacer(modifier = Modifier.height(20.dp))
@@ -790,6 +981,14 @@ internal fun SearchScreen(
 								recentSearches = recentSearches,
 								focusedRecentIndex = (selection as? SearchSelection.RecentSearch)?.index,
 								clearHistorySelected = selection == SearchSelection.ClearHistory,
+								onActivateRecent = { index ->
+									select(SearchSelection.RecentSearch(index))
+									activateSelection()
+								},
+								onClearHistory = {
+									select(SearchSelection.ClearHistory)
+									activateSelection()
+								},
 							)
 						}
 					}
@@ -800,6 +999,10 @@ internal fun SearchScreen(
 								genres = genres,
 								rowStartIndex = rowIndex * GENRE_COLUMN_COUNT,
 								focusedGenreIndex = (selection as? SearchSelection.Genre)?.index,
+								onActivate = { index ->
+									select(SearchSelection.Genre(index))
+									activateSelection()
+								},
 							)
 						}
 					}
@@ -809,6 +1012,10 @@ internal fun SearchScreen(
 							SearchTrendingSearchesSection(
 								trendingSearches = trendingSearches,
 								focusedTrendingIndex = (selection as? SearchSelection.Trending)?.index,
+								onActivate = { index ->
+									select(SearchSelection.Trending(index))
+									activateSelection()
+								},
 							)
 						}
 					}
@@ -822,6 +1029,10 @@ internal fun SearchScreen(
 							SearchTopResult(
 								item = searchRowItem(topResult),
 								selected = selection == SearchSelection.TopResult,
+								onActivate = {
+									select(SearchSelection.TopResult)
+									activateSelection()
+								},
 							)
 						}
 					}
@@ -837,6 +1048,10 @@ internal fun SearchScreen(
 							selectedItemIndex = (selection as? SearchSelection.RowItem)
 								?.takeIf { it.rowIndex == rowIndex }
 								?.itemIndex,
+							onActivateItem = { itemIndex ->
+								select(SearchSelection.RowItem(rowIndex, itemIndex))
+								activateSelection()
+							},
 						)
 					}
 				}
@@ -860,24 +1075,54 @@ private fun SearchHeader(
 	onMoveFromInput: (Int) -> Unit,
 	showKeyboardOnFocus: Boolean,
 ) {
+	val searchHint = stringResource(R.string.search_hint)
 	val textFieldFocusRequester = remember { FocusRequester() }
+	var hadInputFocus by remember { mutableStateOf(false) }
+	var skipNextFocusExit by remember { mutableStateOf(false) }
+
+	fun exitInput(delta: Int) {
+		skipNextFocusExit = true
+		onEditingChange(false)
+		onMoveFromInput(delta)
+	}
+
+	fun handleInputFocusChange(focused: Boolean) {
+		if (focused) {
+			hadInputFocus = true
+			return
+		}
+
+		if (!hadInputFocus || !editing || !selected) return
+
+		if (skipNextFocusExit) {
+			hadInputFocus = false
+			skipNextFocusExit = false
+			return
+		}
+
+		hadInputFocus = false
+		onEditingChange(false)
+		onMoveFromInput(1)
+	}
 
 	fun handleSearchInputKeyCode(keyCode: Int): Boolean =
 		when (keyCode) {
+			AndroidKeyEvent.KEYCODE_BACK -> {
+				exitInput(1)
+				true
+			}
 			AndroidKeyEvent.KEYCODE_DPAD_UP -> {
-				onEditingChange(false)
-				onMoveFromInput(-1)
+				exitInput(-1)
 				true
 			}
 			AndroidKeyEvent.KEYCODE_DPAD_DOWN -> {
-				onEditingChange(false)
-				onMoveFromInput(1)
+				exitInput(1)
 				true
 			}
 			AndroidKeyEvent.KEYCODE_DPAD_CENTER,
 			AndroidKeyEvent.KEYCODE_ENTER,
 			AndroidKeyEvent.KEYCODE_NUMPAD_ENTER -> {
-				onEditingChange(true)
+				onQuerySubmit()
 				true
 			}
 			else -> false
@@ -885,6 +1130,13 @@ private fun SearchHeader(
 
 	LaunchedEffect(selected) {
 		if (!selected) onEditingChange(false)
+	}
+
+	LaunchedEffect(editing) {
+		if (editing) {
+			hadInputFocus = false
+			skipNextFocusExit = false
+		}
 	}
 
 	LaunchedEffect(editing, selected) {
@@ -916,7 +1168,7 @@ private fun SearchHeader(
 					.background(Color.White.copy(alpha = 0.04f))
 					.padding(2.dp)
 			) {
-				if (editing) {
+				if (editing && selected) {
 					SearchTextInput(
 						query = query,
 						onQueryChange = onQueryChange,
@@ -924,10 +1176,11 @@ private fun SearchHeader(
 							onEditingChange(false)
 							onQuerySubmit()
 						},
-						placeholder = "Busca títulos, personas, géneros...",
+						placeholder = searchHint,
 						canFocus = true,
 						forceFocused = selected,
 						showKeyboardOnFocus = editing || showKeyboardOnFocus,
+						onFocusChange = ::handleInputFocusChange,
 						onKeyPressed = { keyCode ->
 							handleSearchInputKeyCode(keyCode)
 						},
@@ -938,7 +1191,7 @@ private fun SearchHeader(
 				} else {
 					SearchInputDisplay(
 						query = query,
-						placeholder = "Busca títulos, personas, géneros...",
+						placeholder = searchHint,
 						selected = selected,
 					)
 				}
@@ -984,7 +1237,9 @@ private fun SearchFilters(
 	filters: List<SearchFilter>,
 	selectedFilterIndex: Int,
 	focusedFilterIndex: Int?,
+	onActivate: (Int) -> Boolean,
 ) {
+	val actionLabel = stringResource(R.string.search_action_activate)
 	LazyRow(
 		contentPadding = PaddingValues(horizontal = 54.dp),
 		horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -993,8 +1248,15 @@ private fun SearchFilters(
 		itemsIndexed(filters) { index, filter ->
 			val selected = selectedFilterIndex == index
 			val focused = focusedFilterIndex == index
+			val countDescription = pluralStringResource(
+				R.plurals.search_result_count,
+				filter.count,
+				filter.count,
+			)
+			val description = stringResource(R.string.search_a11y_filter, filter.label, countDescription)
 			Row(
 				modifier = Modifier
+					.searchControlSemantics(description, selected, actionLabel) { onActivate(index) }
 					.border(
 						width = if (focused) 2.dp else 1.dp,
 						color = when {
@@ -1035,24 +1297,28 @@ private fun SearchFilters(
 private fun SearchTopResult(
 	item: BaseRowItem,
 	selected: Boolean,
+	onActivate: () -> Boolean,
 ) {
 	val context = LocalContext.current
 	val api = koinInject<ApiClient>()
 	val imageUrl = item.searchLandscapeImageUrl(api, maxWidth = 720, maxHeight = 405)
 	val title = item.getCardName(context) ?: item.getName(context).orEmpty()
 	val subtitle = item.getSubText(context).orEmpty()
+	val actionLabel = stringResource(R.string.search_action_activate)
+	val description = stringResource(R.string.search_a11y_top_result, title)
 
 	Column(
 		modifier = Modifier
 			.fillMaxWidth()
 			.padding(start = 54.dp, top = 30.dp, end = 54.dp)
 	) {
-		SectionEyebrow("Mejor resultado")
+		SectionEyebrow(stringResource(R.string.search_top_result))
 
 		Spacer(modifier = Modifier.height(14.dp))
 
 		Row(
 			modifier = Modifier
+				.searchControlSemantics(description, null, actionLabel, onActivate)
 				.fillMaxWidth()
 				.shadow(if (selected) 30.dp else 0.dp, TOP_RESULT_SHAPE)
 				.border(
@@ -1135,7 +1401,7 @@ private fun SearchTopResult(
 						modifier = Modifier.size(18.dp),
 					)
 					Text(
-						text = "Abrir",
+						text = stringResource(R.string.lbl_open),
 						color = Color.Black,
 						fontSize = 14.sp,
 						fontWeight = FontWeight.ExtraBold,
@@ -1152,6 +1418,7 @@ private fun SearchResultRow(
 	items: List<BaseRowItem>,
 	rowIndex: Int,
 	selectedItemIndex: Int?,
+	onActivateItem: (Int) -> Boolean,
 ) {
 	val rowListState = rememberLazyListState()
 	val safeSelectedIndex = selectedItemIndex?.coerceIn(0, (items.size - 1).coerceAtLeast(0))
@@ -1182,7 +1449,7 @@ private fun SearchResultRow(
 
 			Text(
 				modifier = Modifier.padding(bottom = 3.dp),
-				text = "${items.size}",
+				text = pluralStringResource(R.plurals.search_result_count, items.size, items.size),
 				color = Color.White.copy(alpha = 0.45f),
 				fontSize = 15.sp,
 				fontWeight = FontWeight.Bold,
@@ -1204,6 +1471,7 @@ private fun SearchResultRow(
 				SearchResultCard(
 					item = item,
 					selected = safeSelectedIndex == index,
+					onActivate = { onActivateItem(index) },
 				)
 			}
 		}
@@ -1214,6 +1482,7 @@ private fun SearchResultRow(
 private fun SearchResultCard(
 	item: BaseRowItem,
 	selected: Boolean,
+	onActivate: () -> Boolean,
 ) {
 	val context = LocalContext.current
 	val api = koinInject<ApiClient>()
@@ -1221,11 +1490,16 @@ private fun SearchResultCard(
 	val imageUrl = item.searchLandscapeImageUrl(api, maxWidth = 560, maxHeight = 315)
 	val title = item.getCardName(context) ?: item.getName(context).orEmpty()
 	val subtitle = item.getSubText(context).orEmpty()
-	val kindLabel = item.baseItem?.type?.searchKindLabel()
+	@StringRes
+	val kindLabelRes = item.baseItem?.type?.searchKindLabelRes()
+	val kindLabel = if (kindLabelRes == null) null else stringResource(kindLabelRes)
+	val actionLabel = stringResource(R.string.search_action_activate)
+	val description = stringResource(R.string.search_a11y_result, title)
 
 	Column(
 		modifier = Modifier
 			.width(260.dp)
+			.searchControlSemantics(description, null, actionLabel, onActivate)
 			.graphicsLayer {
 				scaleX = scale
 				scaleY = scale
@@ -1345,6 +1619,8 @@ private fun SearchRecentSearchesSection(
 	recentSearches: List<SearchShortcut>,
 	focusedRecentIndex: Int?,
 	clearHistorySelected: Boolean,
+	onActivateRecent: (Int) -> Boolean,
+	onClearHistory: () -> Boolean,
 ) {
 	Column(
 		modifier = Modifier
@@ -1352,9 +1628,10 @@ private fun SearchRecentSearchesSection(
 			.padding(start = 54.dp, top = 28.dp, end = 54.dp, bottom = 16.dp),
 	) {
 		SearchDiscoverySection(
-			title = "Búsquedas recientes",
-			trailing = "Borrar historial",
+			title = stringResource(R.string.search_recent_searches),
+			trailing = stringResource(R.string.search_clear_history),
 			trailingSelected = clearHistorySelected,
+			onTrailingActivate = onClearHistory,
 		)
 
 		Spacer(modifier = Modifier.height(14.dp))
@@ -1364,6 +1641,7 @@ private fun SearchRecentSearchesSection(
 				RecentSearchChip(
 					shortcut = shortcut,
 					selected = focusedRecentIndex == index,
+					onActivate = { onActivateRecent(index) },
 				)
 			}
 		}
@@ -1375,6 +1653,7 @@ private fun SearchGenreRow(
 	genres: List<SearchGenre>,
 	rowStartIndex: Int,
 	focusedGenreIndex: Int?,
+	onActivate: (Int) -> Boolean,
 ) {
 	Column(
 		modifier = Modifier
@@ -1385,8 +1664,8 @@ private fun SearchGenreRow(
 			Spacer(modifier = Modifier.height(18.dp))
 
 			SearchDiscoverySection(
-				title = "Explorar por género",
-				trailing = "Tocá uno para ver todo el contenido",
+				title = stringResource(R.string.search_explore_genre),
+				trailing = stringResource(R.string.search_explore_genre_hint),
 			)
 
 			Spacer(modifier = Modifier.height(16.dp))
@@ -1402,6 +1681,7 @@ private fun SearchGenreRow(
 					genre = genre,
 					selected = focusedGenreIndex == index,
 					modifier = Modifier.weight(1f),
+					onActivate = { onActivate(index) },
 				)
 			}
 			repeat(GENRE_COLUMN_COUNT - genres.size) {
@@ -1415,6 +1695,7 @@ private fun SearchGenreRow(
 private fun SearchTrendingSearchesSection(
 	trendingSearches: List<TrendingShortcut>,
 	focusedTrendingIndex: Int?,
+	onActivate: (Int) -> Boolean,
 ) {
 	Column(
 		modifier = Modifier
@@ -1422,8 +1703,8 @@ private fun SearchTrendingSearchesSection(
 			.padding(start = 54.dp, top = 20.dp, end = 54.dp, bottom = 28.dp),
 	) {
 		SearchDiscoverySection(
-			title = "Explorar por colección",
-			trailing = "Sagas y grupos personalizados",
+			title = stringResource(R.string.search_explore_collection),
+			trailing = stringResource(R.string.search_explore_collection_hint),
 		)
 
 		Spacer(modifier = Modifier.height(16.dp))
@@ -1437,6 +1718,7 @@ private fun SearchTrendingSearchesSection(
 					trend = trend,
 					selected = focusedTrendingIndex == index,
 					modifier = Modifier.weight(1f),
+					onActivate = { onActivate(index) },
 				)
 			}
 		}
@@ -1448,7 +1730,9 @@ private fun SearchDiscoverySection(
 	title: String,
 	trailing: String,
 	trailingSelected: Boolean = false,
+	onTrailingActivate: (() -> Boolean)? = null,
 ) {
+	val actionLabel = stringResource(R.string.search_action_activate)
 	Row(
 		modifier = Modifier.fillMaxWidth(),
 		verticalAlignment = Alignment.Bottom,
@@ -1466,6 +1750,15 @@ private fun SearchDiscoverySection(
 
 		Box(
 			modifier = Modifier
+				.then(
+					if (onTrailingActivate == null) Modifier
+					else Modifier.searchControlSemantics(
+						description = trailing,
+						selectionState = null,
+						actionLabel = actionLabel,
+						onActivate = onTrailingActivate,
+					)
+				)
 				.border(
 					width = if (trailingSelected) 2.dp else 0.dp,
 					color = Color.White.copy(alpha = 0.92f),
@@ -1493,11 +1786,15 @@ private fun SearchDiscoverySection(
 private fun RecentSearchChip(
 	shortcut: SearchShortcut,
 	selected: Boolean,
+	onActivate: () -> Boolean,
 ) {
 	val scale by animateFloatAsState(targetValue = if (selected) 1.05f else 1f, label = "recent-search-scale")
+	val actionLabel = stringResource(R.string.search_action_activate)
+	val description = stringResource(R.string.search_a11y_recent_search, shortcut.label)
 
 	Row(
 		modifier = Modifier
+			.searchControlSemantics(description, null, actionLabel, onActivate)
 			.graphicsLayer {
 				scaleX = scale
 				scaleY = scale
@@ -1536,6 +1833,7 @@ private fun GenreShortcutCard(
 	genre: SearchGenre,
 	selected: Boolean,
 	modifier: Modifier = Modifier,
+	onActivate: () -> Boolean,
 ) {
 	val api = koinInject<ApiClient>()
 	val scale by animateFloatAsState(targetValue = if (selected) 1.04f else 1f, label = "genre-shortcut-scale")
@@ -1543,9 +1841,13 @@ private fun GenreShortcutCard(
 	val representativeImageUrl = representativeItem
 		?.let(::searchRowItem)
 		?.searchLandscapeImageUrl(api, maxWidth = 480, maxHeight = 270)
+	val titleCount = pluralStringResource(R.plurals.search_title_count, genre.count, genre.count)
+	val actionLabel = stringResource(R.string.search_action_activate)
+	val description = stringResource(R.string.search_a11y_genre, genre.label, titleCount)
 
 	Box(
 		modifier = modifier
+			.searchControlSemantics(description, null, actionLabel, onActivate)
 			.height(92.dp)
 			.graphicsLayer {
 				scaleX = scale
@@ -1615,7 +1917,7 @@ private fun GenreShortcutCard(
 			)
 			Spacer(modifier = Modifier.height(2.dp))
 			Text(
-				text = "${genre.count} títulos",
+				text = titleCount,
 				color = Color.White.copy(alpha = 0.62f),
 				fontSize = 12.sp,
 				fontWeight = FontWeight.Bold,
@@ -1630,6 +1932,7 @@ private fun TrendingShortcutCard(
 	trend: TrendingShortcut,
 	selected: Boolean,
 	modifier: Modifier = Modifier,
+	onActivate: () -> Boolean,
 ) {
 	val api = koinInject<ApiClient>()
 	val scale by animateFloatAsState(targetValue = if (selected) 1.04f else 1f, label = "trending-shortcut-scale")
@@ -1637,9 +1940,12 @@ private fun TrendingShortcutCard(
 	val representativeImageUrl = representativeItem
 		?.let(::searchRowItem)
 		?.searchLandscapeImageUrl(api, maxWidth = 220, maxHeight = 124)
+	val actionLabel = stringResource(R.string.search_action_activate)
+	val description = stringResource(R.string.search_a11y_collection, trend.title)
 
 	Row(
 		modifier = modifier
+			.searchControlSemantics(description, null, actionLabel, onActivate)
 			.graphicsLayer {
 				scaleX = scale
 				scaleY = scale
@@ -1719,7 +2025,7 @@ private fun SearchNoResults(query: String) {
 		)
 		Spacer(modifier = Modifier.height(18.dp))
 		Text(
-			text = "Sin resultados para \"$query\"",
+			text = stringResource(R.string.search_no_results, query),
 			color = Color.White,
 			fontSize = 26.sp,
 			fontWeight = FontWeight.ExtraBold,
@@ -1728,7 +2034,7 @@ private fun SearchNoResults(query: String) {
 		)
 		Spacer(modifier = Modifier.height(8.dp))
 		Text(
-			text = "Probá con otro título, actor o colección.",
+			text = stringResource(R.string.search_no_results_hint),
 			color = Color.White.copy(alpha = 0.58f),
 			fontSize = 15.sp,
 			fontWeight = FontWeight.SemiBold,
@@ -1770,21 +2076,22 @@ private fun BaseRowItem.searchLandscapeImageUrl(
 		)
 	}
 
-private fun BaseItemKind.searchKindLabel() = when (this) {
-	BaseItemKind.MOVIE -> "PELÍCULA"
-	BaseItemKind.SERIES -> "SERIE"
-	BaseItemKind.EPISODE -> "EPISODIO"
-	BaseItemKind.VIDEO -> "VIDEO"
-	BaseItemKind.LIVE_TV_PROGRAM -> "PROGRAMA"
-	BaseItemKind.LIVE_TV_CHANNEL -> "CANAL"
-	BaseItemKind.PLAYLIST -> "PLAYLIST"
-	BaseItemKind.MUSIC_ARTIST -> "ARTISTA"
-	BaseItemKind.MUSIC_ALBUM -> "ÁLBUM"
-	BaseItemKind.AUDIO -> "CANCIÓN"
-	BaseItemKind.PHOTO_ALBUM -> "ÁLBUM"
-	BaseItemKind.PHOTO -> "FOTO"
-	BaseItemKind.BOX_SET -> "COLECCIÓN"
-	BaseItemKind.PERSON -> "PERSONA"
+@StringRes
+private fun BaseItemKind.searchKindLabelRes(): Int? = when (this) {
+	BaseItemKind.MOVIE -> R.string.search_kind_movie
+	BaseItemKind.SERIES -> R.string.search_kind_series
+	BaseItemKind.EPISODE -> R.string.search_kind_episode
+	BaseItemKind.VIDEO -> R.string.search_kind_video
+	BaseItemKind.LIVE_TV_PROGRAM -> R.string.search_kind_live_tv_program
+	BaseItemKind.LIVE_TV_CHANNEL -> R.string.search_kind_live_tv_channel
+	BaseItemKind.PLAYLIST -> R.string.search_kind_playlist
+	BaseItemKind.MUSIC_ARTIST -> R.string.search_kind_music_artist
+	BaseItemKind.MUSIC_ALBUM -> R.string.search_kind_music_album
+	BaseItemKind.AUDIO -> R.string.search_kind_audio
+	BaseItemKind.PHOTO_ALBUM -> R.string.search_kind_photo_album
+	BaseItemKind.PHOTO -> R.string.search_kind_photo
+	BaseItemKind.BOX_SET -> R.string.search_kind_collection
+	BaseItemKind.PERSON -> R.string.search_kind_person
 	else -> null
 }
 

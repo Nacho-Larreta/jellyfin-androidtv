@@ -658,4 +658,44 @@
     <string name="profile_selector_owner_meta">Administrador del servidor</string>
     <string name="profile_selector_kids_meta">Modo niños</string>
     <string name="profile_selector_pin_meta">Protegido con PIN</string>
+    <string name="search_filter_all">Todo</string>
+    <string name="search_hint">Busca títulos, personas, géneros…</string>
+    <string name="search_action_activate">Activar</string>
+    <string name="search_top_result">Mejor resultado</string>
+    <string name="search_recent_searches">Búsquedas recientes</string>
+    <string name="search_clear_history">Borrar historial de búsqueda</string>
+    <string name="search_explore_genre">Explorar por género</string>
+    <string name="search_explore_genre_hint">Elige una categoría para explorar contenido</string>
+    <string name="search_explore_collection">Explorar por colección</string>
+    <string name="search_explore_collection_hint">Sagas y grupos personalizados</string>
+    <string name="search_no_results">Sin resultados para «%1$s»</string>
+    <string name="search_no_results_hint">Prueba con otro título, actor o colección.</string>
+    <string name="search_a11y_recent_search">Búsqueda reciente, %1$s</string>
+    <string name="search_a11y_genre">Género %1$s, %2$s</string>
+    <string name="search_a11y_collection">Colección, %1$s</string>
+    <string name="search_a11y_filter">Filtro %1$s, %2$s</string>
+    <string name="search_a11y_top_result">Mejor resultado, %1$s</string>
+    <string name="search_a11y_result">Resultado, %1$s</string>
+    <string name="search_kind_movie">Película</string>
+    <string name="search_kind_series">Serie</string>
+    <string name="search_kind_episode">Episodio</string>
+    <string name="search_kind_video">Vídeo</string>
+    <string name="search_kind_live_tv_program">Programa</string>
+    <string name="search_kind_live_tv_channel">Canal</string>
+    <string name="search_kind_playlist">Lista de reproducción</string>
+    <string name="search_kind_music_artist">Artista</string>
+    <string name="search_kind_music_album">Álbum</string>
+    <string name="search_kind_audio">Canción</string>
+    <string name="search_kind_photo_album">Álbum de fotos</string>
+    <string name="search_kind_photo">Foto</string>
+    <string name="search_kind_collection">Colección</string>
+    <string name="search_kind_person">Persona</string>
+    <plurals name="search_result_count">
+        <item quantity="one">%1$d resultado</item>
+        <item quantity="other">%1$d resultados</item>
+    </plurals>
+    <plurals name="search_title_count">
+        <item quantity="one">%1$d título</item>
+        <item quantity="other">%1$d títulos</item>
+    </plurals>
 </resources>

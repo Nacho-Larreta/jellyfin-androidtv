@@ -30,6 +30,8 @@ import org.jellyfin.sdk.model.api.request.GetItemsRequest
 import org.jellyfin.sdk.model.serializer.UUIDSerializer
 import timber.log.Timber
 import java.io.IOException
+import java.text.Normalizer
+import java.util.Locale
 import java.util.UUID
 
 data class SearchHistoryEntry(
@@ -99,11 +101,30 @@ class SearchRepositoryImpl(
 	override suspend fun search(
 		searchTerm: String,
 		itemTypes: Collection<BaseItemKind>,
-	): Result<List<BaseItemDto>> = searchItems(
-		searchTerm = searchTerm.trim().takeIf { it.isNotBlank() },
-		genre = null,
-		itemTypes = itemTypes,
-	)
+	): Result<List<BaseItemDto>> {
+		val trimmed = searchTerm.trim()
+		val primaryResult = searchItems(
+			searchTerm = trimmed.takeIf { it.isNotBlank() },
+			genre = null,
+			itemTypes = itemTypes,
+		)
+
+		val primaryItems = primaryResult.getOrNull()
+		if (primaryResult.isFailure || trimmed.isBlank()) return primaryResult
+
+		val normalizedSearchTerm = trimmed.normalizedSearchKey()
+		val fallbackItems = if (primaryItems.isNullOrEmpty() && normalizedSearchTerm != trimmed) {
+			searchItems(
+				searchTerm = normalizedSearchTerm.takeIf { it.isNotBlank() },
+				genre = null,
+				itemTypes = itemTypes,
+			).getOrNull().orEmpty()
+		} else {
+			emptyList()
+		}
+
+		return Result.success((primaryItems.orEmpty() + fallbackItems).rankByBestSearchMatch(trimmed))
+	}
 
 	override suspend fun searchByGenre(
 		genre: String,
@@ -336,3 +357,55 @@ private data class ExploreItemDto(
 	@SerialName("Item") val item: JsonElement? = null,
 	@SerialName("RepresentativeItem") val representativeItem: JsonElement? = null,
 )
+
+private fun List<BaseItemDto>.rankByBestSearchMatch(searchTerm: String): List<BaseItemDto> {
+	val normalizedQuery = searchTerm.normalizedSearchKey()
+	if (normalizedQuery.isBlank()) return this
+
+	return withIndex()
+		.distinctBy { (_, item) -> item.id }
+		.sortedWith(
+			compareBy<IndexedValue<BaseItemDto>>(
+				{ (_, item) -> item.bestMatchScore(normalizedQuery) },
+				{ it.index },
+			)
+		)
+		.map { it.value }
+}
+
+private fun BaseItemDto.bestMatchScore(normalizedQuery: String): Int {
+	val searchableNames = listOfNotNull(name, originalTitle, seriesName)
+		.map { it.normalizedSearchKey() }
+		.filter { it.isNotBlank() }
+
+	return searchableNames.minOfOrNull { candidate ->
+		when {
+			candidate == normalizedQuery -> 0
+			candidate.startsWith(normalizedQuery) -> 10 + candidate.length - normalizedQuery.length
+			candidate.split(' ').any { word -> word.startsWith(normalizedQuery) } -> 30
+			candidate.contains(normalizedQuery) -> 50 + candidate.indexOf(normalizedQuery)
+			candidate.isOrderedSubsequenceOf(normalizedQuery) -> 80 + candidate.length
+			else -> 1_000
+		}
+	} ?: 1_000
+}
+
+private fun String.normalizedSearchKey(): String = Normalizer
+	.normalize(this, Normalizer.Form.NFD)
+	.replace("\\p{Mn}+".toRegex(), "")
+	.lowercase(Locale.ROOT)
+	.replace("[^\\p{Alnum}]+".toRegex(), " ")
+	.trim()
+	.replace("\\s+".toRegex(), " ")
+
+private fun String.isOrderedSubsequenceOf(needle: String): Boolean {
+	if (needle.isBlank()) return true
+
+	var needleIndex = 0
+	for (character in this) {
+		if (character == needle[needleIndex]) needleIndex++
+		if (needleIndex == needle.length) return true
+	}
+
+	return false
+}

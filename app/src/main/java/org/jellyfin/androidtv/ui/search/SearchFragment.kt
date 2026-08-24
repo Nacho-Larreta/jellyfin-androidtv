@@ -11,10 +11,13 @@ import androidx.activity.OnBackPressedCallback
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.fragment.app.Fragment
+import org.jellyfin.androidtv.ui.browsing.PreDispatchKeyEventHandler
+import org.jellyfin.androidtv.ui.input.toRemoteKeyStrokeOrNull
 
-class SearchFragment : Fragment() {
+class SearchFragment : Fragment(), PreDispatchKeyEventHandler {
 	companion object {
 		const val EXTRA_QUERY = "query"
+		private const val REMOTE_FOCUS_RECLAIM_DELAY_MILLIS = 250L
 	}
 
 	private lateinit var backCallback: OnBackPressedCallback
@@ -23,13 +26,31 @@ class SearchFragment : Fragment() {
 	private var handleSearchKeyPressed: (Int) -> Boolean = { false }
 
 	private inner class SearchKeyHost(context: Context) : FrameLayout(context) {
-		override fun dispatchKeyEvent(event: AndroidKeyEvent): Boolean {
-			if (event.action == AndroidKeyEvent.ACTION_DOWN) {
-				val handled = handleSearchKeyPressed(event.keyCode)
-				if (handled) return true
-			}
+		private val preImeKeyRouter = SearchPreImeKeyRouter(
+			backKeyCode = AndroidKeyEvent.KEYCODE_BACK,
+			handleBack = { keyCode -> handleSearchKeyPressed(keyCode) },
+		)
 
-			return super.dispatchKeyEvent(event)
+		fun reclaimRemoteFocus() {
+			requestFocus()
+			requestFocusFromTouch()
+		}
+
+		override fun dispatchKeyEventPreIme(event: AndroidKeyEvent): Boolean {
+			val keyStroke = event.toRemoteKeyStrokeOrNull()
+			if (keyStroke != null && preImeKeyRouter.route(keyStroke)) return true
+
+			return super.dispatchKeyEventPreIme(event)
+		}
+
+		override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+			super.onWindowFocusChanged(hasWindowFocus)
+			if (!hasWindowFocus) preImeKeyRouter.reset()
+		}
+
+		override fun onDetachedFromWindow() {
+			preImeKeyRouter.reset()
+			super.onDetachedFromWindow()
 		}
 	}
 
@@ -72,8 +93,8 @@ class SearchFragment : Fragment() {
 			),
 		)
 		post {
-			requestFocusFromTouch()
-			requestFocus()
+			reclaimRemoteFocus()
+			postDelayed(::reclaimRemoteFocus, REMOTE_FOCUS_RECLAIM_DELAY_MILLIS)
 		}
 	}
 
@@ -84,10 +105,15 @@ class SearchFragment : Fragment() {
 		// returning from IME, details, or player screens so DPAD events do not
 		// leak to the previously focused Leanback view behind Compose.
 		view?.post {
-			view?.requestFocusFromTouch()
-			view?.requestFocus()
+			(view as? SearchKeyHost)?.reclaimRemoteFocus()
+			view?.postDelayed(
+				{ (view as? SearchKeyHost)?.reclaimRemoteFocus() },
+				REMOTE_FOCUS_RECLAIM_DELAY_MILLIS,
+			)
 		}
 	}
+
+	override fun onPreDispatchKeyDown(keyCode: Int): Boolean = handleSearchKeyPressed(keyCode)
 
 	override fun onDestroyView() {
 		handleSearchBackPressed = { false }

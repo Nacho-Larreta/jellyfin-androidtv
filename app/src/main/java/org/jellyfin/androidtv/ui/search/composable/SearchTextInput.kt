@@ -17,6 +17,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -24,6 +25,8 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.res.vectorResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -45,6 +48,7 @@ fun SearchTextInput(
 	canFocus: Boolean = true,
 	forceFocused: Boolean = false,
 	showKeyboardOnFocus: Boolean = true,
+	onFocusChange: (focused: Boolean) -> Unit = {},
 	onKeyPressed: (keyCode: Int) -> Boolean = { false },
 ) {
 	val interactionSource = remember { MutableInteractionSource() }
@@ -84,7 +88,9 @@ fun SearchTextInput(
 	) {
 		BasicTextField(
 			modifier = modifier
+				.semantics { contentDescription = placeholder }
 				.onPreviewKeyEvent(::handleTvNavigation)
+				.onFocusChanged { onFocusChange(it.hasFocus) }
 				.focusProperties { this.canFocus = canFocus },
 			value = query,
 			singleLine = true,

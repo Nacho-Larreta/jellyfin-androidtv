@@ -143,7 +143,7 @@ private fun MainToolbar(
 		userViews.jellyflixPrimaryNavigationViews(userViewsRepository)
 	}
 	val activeButtonColors = ButtonDefaults.colors(
-		containerColor = Color.Transparent,
+		containerColor = if (showFocusVisuals) Color.White.copy(alpha = 0.16f) else Color.Transparent,
 		contentColor = Color.White,
 		focusedContainerColor = if (showFocusVisuals) Color.White.copy(alpha = 0.16f) else Color.Transparent,
 		focusedContentColor = Color.White,
@@ -204,12 +204,16 @@ private fun MainToolbar(
 		ToolbarButtons(
 			modifier = Modifier
 				.align(Alignment.Center)
-				.focusRequester(focusRequester)
 		) {
 			ProvideTextStyle(JellyfinTheme.typography.default.copy(fontWeight = FontWeight.SemiBold)) {
 				TvHeaderNavButton(
 					text = "Inicio",
 					selected = activeButton == MainToolbarActiveButton.Home,
+					focusRequester = if (activeButton == MainToolbarActiveButton.Home || activeButton == MainToolbarActiveButton.None) {
+						focusRequester
+					} else {
+						null
+					},
 					downFocusRequester = downFocusRequester,
 					onNavigateDown = onNavigateDown,
 					onClick = {
@@ -261,6 +265,7 @@ private fun MainToolbar(
 				TvHeaderNavButton(
 					text = "Buscar",
 					selected = activeButton == MainToolbarActiveButton.Search,
+					focusRequester = if (activeButton == MainToolbarActiveButton.Search) focusRequester else null,
 					downFocusRequester = downFocusRequester,
 					onNavigateDown = onNavigateDown,
 					onClick = {
@@ -285,6 +290,7 @@ private fun MainToolbar(
 				colorSeed = currentUserSeed.ifBlank { currentUserName },
 				colorIndex = profileColorIndex,
 				selected = activeButton == MainToolbarActiveButton.User,
+				focusRequester = if (activeButton == MainToolbarActiveButton.User) focusRequester else null,
 				downFocusRequester = downFocusRequester,
 				onNavigateDown = onNavigateDown,
 				onClick = openProfileSelector,
@@ -322,6 +328,7 @@ private fun JellyflixWordmark() {
 private fun TvHeaderNavButton(
 	text: String,
 	selected: Boolean,
+	focusRequester: FocusRequester? = null,
 	colors: org.jellyfin.androidtv.ui.base.button.ButtonColors,
 	downFocusRequester: FocusRequester?,
 	onNavigateDown: () -> Unit,
@@ -330,6 +337,7 @@ private fun TvHeaderNavButton(
 	Button(
 		onClick = onClick,
 		modifier = Modifier
+			.then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
 			.focusProperties {
 				downFocusRequester?.let { down = it }
 				onExit = {
@@ -359,6 +367,7 @@ private fun ProfileSwitcherButton(
 	colorSeed: String,
 	colorIndex: Int?,
 	selected: Boolean,
+	focusRequester: FocusRequester?,
 	downFocusRequester: FocusRequester?,
 	onNavigateDown: () -> Unit,
 	onClick: () -> Unit,
@@ -374,6 +383,7 @@ private fun ProfileSwitcherButton(
 	Button(
 		onClick = onClick,
 		modifier = Modifier
+			.then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
 			.focusProperties {
 				downFocusRequester?.let { down = it }
 				onExit = {

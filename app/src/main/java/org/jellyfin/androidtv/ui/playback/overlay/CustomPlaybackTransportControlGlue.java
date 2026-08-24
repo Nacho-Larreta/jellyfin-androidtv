@@ -26,6 +26,8 @@ import org.jellyfin.androidtv.R;
 import org.jellyfin.androidtv.preference.UserPreferences;
 import org.jellyfin.androidtv.preference.constant.ClockBehavior;
 import org.jellyfin.androidtv.ui.playback.PlaybackController;
+import org.jellyfin.androidtv.ui.playback.PlayerProgressActivationEffect;
+import org.jellyfin.androidtv.ui.playback.PlayerRemoteInputPolicy;
 import org.jellyfin.androidtv.ui.playback.overlay.action.AndroidAction;
 import org.jellyfin.androidtv.ui.playback.overlay.action.ChannelBarChannelAction;
 import org.jellyfin.androidtv.ui.playback.overlay.action.ChapterAction;
@@ -166,8 +168,9 @@ public class CustomPlaybackTransportControlGlue extends PlaybackTransportControl
 
             @Override
             protected void onProgressBarClicked(PlaybackTransportRowPresenter.ViewHolder vh) {
-                CustomPlaybackTransportControlGlue controlglue = CustomPlaybackTransportControlGlue.this;
-                controlglue.onActionClicked(controlglue.playPauseAction);
+                if (PlayerRemoteInputPolicy.progressActivationEffect() == PlayerProgressActivationEffect.ConsumeAndKeepTimelineFocus) {
+                    return;
+                }
             }
 
             @Override

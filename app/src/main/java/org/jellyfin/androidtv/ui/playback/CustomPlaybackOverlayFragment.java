@@ -52,6 +52,7 @@ import org.jellyfin.androidtv.ui.ObservableHorizontalScrollView;
 import org.jellyfin.androidtv.ui.ObservableScrollView;
 import org.jellyfin.androidtv.ui.ProgramGridCell;
 import org.jellyfin.androidtv.ui.ScrollViewListener;
+import org.jellyfin.androidtv.ui.browsing.PreDispatchKeyEventHandler;
 import org.jellyfin.androidtv.ui.itemhandling.ChapterItemInfoBaseRowItem;
 import org.jellyfin.androidtv.ui.itemhandling.ItemRowAdapter;
 import org.jellyfin.androidtv.ui.livetv.LiveTvGuide;
@@ -86,9 +87,10 @@ import java.util.UUID;
 import kotlin.Lazy;
 import timber.log.Timber;
 
-public class CustomPlaybackOverlayFragment extends Fragment implements LiveTvGuide, View.OnKeyListener {
+public class CustomPlaybackOverlayFragment extends Fragment implements LiveTvGuide, View.OnKeyListener, PreDispatchKeyEventHandler {
     protected VlcPlayerInterfaceBinding binding;
     private OverlayTvGuideBinding tvGuideBinding;
+    private AlertDialog activeDialog;
 
     private RowsSupportFragment mPopupRowsFragment;
     private ListRow mChapterRow;
@@ -231,13 +233,17 @@ public class CustomPlaybackOverlayFragment extends Fragment implements LiveTvGui
         playbackController.playPause();
 
         if (leanbackOverlayFragment != null) {
-            leanbackOverlayFragment.setShouldShowOverlay(true);
-            leanbackOverlayFragment.showControlsOverlay(true);
+            showControlsAndFocus();
             leanbackOverlayFragment.updatePlayState();
-            View overlayView = leanbackOverlayFragment.getView();
-            if (overlayView != null) overlayView.requestFocus();
             setFadingEnabled(!playbackController.isPaused());
         }
+    }
+
+    private void showControlsAndFocus() {
+        leanbackOverlayFragment.setShouldShowOverlay(true);
+        leanbackOverlayFragment.showControlsOverlay(true);
+        View overlayView = leanbackOverlayFragment.getView();
+        if (overlayView != null) overlayView.requestFocus();
     }
 
     @Override
@@ -259,6 +265,7 @@ public class CustomPlaybackOverlayFragment extends Fragment implements LiveTvGui
 
     @Override
     public void onDestroyView() {
+        if (activeDialog != null) activeDialog.dismiss();
         super.onDestroyView();
 
         binding = null;
@@ -440,6 +447,39 @@ public class CustomPlaybackOverlayFragment extends Fragment implements LiveTvGui
             }
         }
     };
+
+    @Override
+    public boolean onPreDispatchKeyDown(int keyCode) {
+        PlayerRemoteDirection direction;
+        if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+            direction = PlayerRemoteDirection.Up;
+        } else if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+            direction = PlayerRemoteDirection.Down;
+        } else {
+            return false;
+        }
+
+        PlaybackController playbackController = playbackControllerContainer.getValue().getPlaybackController();
+        if (playbackController == null || leanbackOverlayFragment == null) return false;
+
+        PlayerRemoteDirectionalAction action = PlayerRemoteInputPolicy.directionalAction(
+                direction,
+                new PlayerRemoteInputState(
+                        playbackController.isLiveTv(),
+                        mPopupPanelVisible,
+                        mGuideVisible,
+                        activeDialog != null && activeDialog.isShowing(),
+                        leanbackOverlayFragment.isControlsOverlayVisible()
+                )
+        );
+        if (action == PlayerRemoteDirectionalAction.RevealControlsAndFocus) {
+            showControlsAndFocus();
+            setFadingEnabled(true);
+            return true;
+        }
+
+        return false;
+    }
 
     @Override
     public boolean onKey(View v, int keyCode, KeyEvent event) {
@@ -1212,32 +1252,38 @@ public class CustomPlaybackOverlayFragment extends Fragment implements LiveTvGui
             if (program.getTimerId() != null) {
                 // cancel
                 if (program.getSeriesTimerId() != null) {
-                    new AlertDialog.Builder(requireContext())
+                    showPlaybackDialog(new AlertDialog.Builder(requireContext())
                             .setTitle(R.string.lbl_cancel_recording)
                             .setMessage(R.string.msg_cancel_entire_series)
                             .setPositiveButton(R.string.lbl_cancel_series, (dialog, which) -> cancelRecording(program, true))
                             .setNegativeButton(R.string.just_one, (dialog, which) -> cancelRecording(program, false))
-                            .show();
+                            .create());
                 } else {
-                    new AlertDialog.Builder(requireContext())
+                    showPlaybackDialog(new AlertDialog.Builder(requireContext())
                             .setTitle(R.string.lbl_cancel_recording)
                             .setPositiveButton(R.string.lbl_yes, (dialog, which) -> cancelRecording(program, false))
                             .setNegativeButton(R.string.lbl_no, null)
-                            .show();
+                            .create());
                 }
             } else {
                 if (Utils.isTrue(program.isSeries())) {
-                    new AlertDialog.Builder(requireContext())
+                    showPlaybackDialog(new AlertDialog.Builder(requireContext())
                             .setTitle(R.string.lbl_record_series)
                             .setMessage(R.string.msg_record_entire_series)
                             .setPositiveButton(R.string.lbl_record_series, (dialog, which) -> CustomPlaybackOverlayFragmentHelperKt.recordProgram(this, program, true))
                             .setNegativeButton(R.string.lbl_just_this_once, (dialog, which) -> CustomPlaybackOverlayFragmentHelperKt.recordProgram(this, program, false))
-                            .show();
+                            .create());
                 } else {
                     CustomPlaybackOverlayFragmentHelperKt.recordProgram(this, program, false);
                 }
             }
         }
+    }
+
+    private void showPlaybackDialog(AlertDialog dialog) {
+        activeDialog = dialog;
+        activeDialog.setOnDismissListener(dismissedDialog -> activeDialog = null);
+        activeDialog.show();
     }
 
     private void cancelRecording(BaseItemDto program, boolean series) {

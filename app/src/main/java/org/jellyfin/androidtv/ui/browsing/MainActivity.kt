@@ -25,6 +25,8 @@ import org.jellyfin.androidtv.ui.background.AppBackground
 import org.jellyfin.androidtv.ui.base.JellyfinTheme
 import org.jellyfin.androidtv.ui.base.ProvideLocalInteractionTracker
 import org.jellyfin.androidtv.ui.composable.compat.AppNavigationHost
+import org.jellyfin.androidtv.ui.input.RemoteKeyPressRouter
+import org.jellyfin.androidtv.ui.input.toRemoteKeyStrokeOrNull
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository
 import org.jellyfin.androidtv.ui.screensaver.InAppScreensaver
 import org.jellyfin.androidtv.ui.settings.compat.MainActivitySettings
@@ -40,6 +42,7 @@ class MainActivity : FragmentActivity() {
 	private val userRepository by inject<UserRepository>()
 	private val interactionTrackerViewModel by viewModel<InteractionTrackerViewModel>()
 	private val workManager by inject<WorkManager>()
+	private val remoteKeyPressRouter = RemoteKeyPressRouter(::onPreDispatchKeyDown)
 
 	override fun onCreate(savedInstanceState: Bundle?) {
 		applyTheme()
@@ -100,9 +103,15 @@ class MainActivity : FragmentActivity() {
 	}
 
 	override fun onPause() {
+		remoteKeyPressRouter.reset()
 		super.onPause()
 
 		interactionTrackerViewModel.activityPaused = true
+	}
+
+	override fun onWindowFocusChanged(hasFocus: Boolean) {
+		if (!hasFocus) remoteKeyPressRouter.reset()
+		super.onWindowFocusChanged(hasFocus)
 	}
 
 	override fun onStop() {
@@ -118,14 +127,26 @@ class MainActivity : FragmentActivity() {
 
 	// Forward key events to fragments
 
+	private fun onPreDispatchKeyDown(keyCode: Int): Boolean = supportFragmentManager.fragments.asReversed()
+		.any { fragment -> fragment.isVisible && fragment.dispatchPreKeyDown(keyCode) }
+
 	private fun Fragment.onKeyEvent(keyCode: Int, event: KeyEvent?): Boolean {
-		var result = childFragmentManager.fragments.any { it.onKeyEvent(keyCode, event) }
-		if (!result && this is View.OnKeyListener) result = onKey(currentFocus, keyCode, event)
+		var result = childFragmentManager.fragments.asReversed().any { fragment ->
+			fragment.isVisible && fragment.onKeyEvent(keyCode, event)
+		}
+		if (!result && isVisible && this is View.OnKeyListener) result = onKey(currentFocus, keyCode, event)
 		return result
 	}
 
-	private fun onKeyEvent(keyCode: Int, event: KeyEvent?): Boolean = supportFragmentManager.fragments
-		.any { it.onKeyEvent(keyCode, event) }
+	private fun onKeyEvent(keyCode: Int, event: KeyEvent?): Boolean = supportFragmentManager.fragments.asReversed()
+		.any { fragment -> fragment.isVisible && fragment.onKeyEvent(keyCode, event) }
+
+	override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+		val remoteKeyStroke = event.toRemoteKeyStrokeOrNull()
+		if (remoteKeyStroke != null && remoteKeyPressRouter.route(remoteKeyStroke)) return true
+
+		return super.dispatchKeyEvent(event)
+	}
 
 	override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean =
 		onKeyEvent(keyCode, event) || super.onKeyDown(keyCode, event)
