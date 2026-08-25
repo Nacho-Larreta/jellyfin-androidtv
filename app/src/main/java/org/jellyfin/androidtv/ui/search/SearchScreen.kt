@@ -41,6 +41,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -903,8 +904,11 @@ internal fun SearchScreen(
 
 	LaunchedEffect(inputEditing) {
 		if (!inputEditing && selection != SearchSelection.Toolbar) {
-			focusManager.clearFocus(force = true)
-			runCatching { contentFocusRequester.requestFocus() }
+			restoreSearchFocusAfterInputExit(
+				clearFocus = { focusManager.clearFocus(force = true) },
+				awaitFocusTreeCommit = { withFrameNanos { } },
+				reclaimFocus = { requestFocusForSelection(selection) },
+			)
 		}
 	}
 
