@@ -18,6 +18,11 @@ enum class PlayerRemoteDirectionalAction {
 	PassThrough,
 }
 
+enum class PlayerRemoteActivationAction {
+	TogglePlayback,
+	PassThrough,
+}
+
 enum class PlayerProgressActivationEffect {
 	ConsumeAndKeepTimelineFocus,
 }
@@ -41,6 +46,14 @@ object PlayerRemoteInputPolicy {
 			PlayerRemoteDirectionalAction.PassThrough
 		}
 	}
+
+	@JvmStatic
+	fun activationAction(state: PlayerRemoteInputState): PlayerRemoteActivationAction =
+		if (state.controlsVisible) {
+			PlayerRemoteActivationAction.PassThrough
+		} else {
+			PlayerRemoteActivationAction.TogglePlayback
+		}
 
 	@JvmStatic
 	fun progressActivationEffect(): PlayerProgressActivationEffect =

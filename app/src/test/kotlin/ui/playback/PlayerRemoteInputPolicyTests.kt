@@ -29,6 +29,16 @@ class PlayerRemoteInputPolicyTests : FunSpec({
 		) shouldBe PlayerRemoteDirectionalAction.PassThrough
 	}
 
+	test("center toggles playback only while VOD controls are actually hidden") {
+		PlayerRemoteInputPolicy.activationAction(
+			PlayerRemoteInputState(controlsVisible = false),
+		) shouldBe PlayerRemoteActivationAction.TogglePlayback
+
+		PlayerRemoteInputPolicy.activationAction(
+			PlayerRemoteInputState(controlsVisible = true),
+		) shouldBe PlayerRemoteActivationAction.PassThrough
+	}
+
 	test("Live TV popup guide and dialog preserve their native handlers") {
 		listOf(
 			PlayerRemoteInputState(liveTv = true),
@@ -61,5 +71,20 @@ class PlayerRemoteInputPolicyTests : FunSpec({
 		callbackBody shouldNotContain "super.onProgressBarClicked"
 		callbackBody shouldNotContain "onActionClicked"
 		callbackBody shouldNotContain "PlayPause"
+	}
+
+	test("playback host derives hidden controls from Leanback instead of the animation flag") {
+		val sourcePath = sequenceOf(
+			Path.of("app/src/main/java/org/jellyfin/androidtv/ui/playback/CustomPlaybackOverlayFragment.java"),
+			Path.of("src/main/java/org/jellyfin/androidtv/ui/playback/CustomPlaybackOverlayFragment.java"),
+		).first { Files.exists(it) }
+		val hiddenControlsBody = sourcePath.toFile().readText()
+			.substringAfter("PlayerRemoteActivationAction activationAction")
+			.substringBefore("//and then manage our fade timer")
+
+		hiddenControlsBody shouldContain "PlayerRemoteInputPolicy.activationAction"
+		hiddenControlsBody shouldContain "leanbackOverlayFragment.isControlsOverlayVisible()"
+		hiddenControlsBody shouldContain "PlayerRemoteActivationAction.TogglePlayback"
+		hiddenControlsBody shouldNotContain "if (!mIsVisible)"
 	}
 })

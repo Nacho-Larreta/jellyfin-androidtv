@@ -663,7 +663,16 @@ public class CustomPlaybackOverlayFragment extends Fragment implements LiveTvGui
                         }
                     }
 
-                    if (!mIsVisible) {
+                    PlayerRemoteActivationAction activationAction = PlayerRemoteInputPolicy.activationAction(
+                            new PlayerRemoteInputState(
+                                    playbackControllerContainer.getValue().getPlaybackController().isLiveTv(),
+                                    mPopupPanelVisible,
+                                    mGuideVisible,
+                                    activeDialog != null && activeDialog.isShowing(),
+                                    leanbackOverlayFragment.isControlsOverlayVisible()
+                            )
+                    );
+                    if (activationAction == PlayerRemoteActivationAction.TogglePlayback) {
                         if (!playbackControllerContainer.getValue().getPlaybackController().isLiveTv()) {
                             if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
                                 setFadingEnabled(true);
