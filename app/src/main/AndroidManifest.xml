@@ -84,6 +84,9 @@
             <meta-data
                 android:name="org.jellyfin.androidtv.SessionInitializer"
                 android:value="androidx.startup" />
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                tools:node="remove" />
         </provider>
 
         <provider

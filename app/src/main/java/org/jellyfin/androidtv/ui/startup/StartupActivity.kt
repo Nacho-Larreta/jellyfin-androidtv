@@ -4,8 +4,13 @@ import android.Manifest
 import android.app.SearchManager
 import android.content.Intent
 import android.os.Bundle
+import android.view.View
+import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.core.view.isVisible
 import androidx.fragment.app.FragmentActivity
 import androidx.fragment.app.add
@@ -71,6 +76,7 @@ class StartupActivity : FragmentActivity(), ProfileSelectorFragment.Host {
 	private val itemLauncher: ItemLauncher by inject()
 
 	private lateinit var binding: ActivityStartupBinding
+	private var backgroundComposeView: ComposeView? = null
 	private var firstFrameCoordinator: StartupFirstFrameCoordinator? = null
 	private var openedForProfileSelector = false
 	private var profileSelectorRequestConsumed = false
@@ -108,7 +114,7 @@ class StartupActivity : FragmentActivity(), ProfileSelectorFragment.Host {
 	}
 
 	private fun startContentAfterFirstFrame() {
-		binding.background.setContent { AppBackground() }
+		attachBackgroundContent()
 		binding.background.isVisible = true
 
 		openedForProfileSelector = intent.getBooleanExtra(EXTRA_OPEN_PROFILE_SELECTOR, false)
@@ -117,6 +123,25 @@ class StartupActivity : FragmentActivity(), ProfileSelectorFragment.Host {
 
 		// Ensure basic permissions
 		networkPermissionsRequester.launch(arrayOf(Manifest.permission.INTERNET, Manifest.permission.ACCESS_NETWORK_STATE))
+	}
+
+	private fun attachBackgroundContent() {
+		if (backgroundComposeView != null) return
+
+		val composeView = ComposeView(this).apply {
+			layoutParams = FrameLayout.LayoutParams(
+				ViewGroup.LayoutParams.MATCH_PARENT,
+				ViewGroup.LayoutParams.MATCH_PARENT,
+			)
+			isFocusable = false
+			descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+			importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+			setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+			setContent { AppBackground() }
+		}
+
+		backgroundComposeView = composeView
+		binding.background.addView(composeView)
 	}
 
 	private fun removeStaticStartupSurface() {

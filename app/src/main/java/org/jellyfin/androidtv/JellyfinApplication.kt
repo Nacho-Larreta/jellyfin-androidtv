@@ -3,6 +3,7 @@ package org.jellyfin.androidtv
 import android.app.Application
 import android.content.Context
 import androidx.work.BackoffPolicy
+import androidx.work.Configuration
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
@@ -18,8 +19,10 @@ import org.jellyfin.androidtv.telemetry.TelemetryService
 import org.koin.android.ext.android.inject
 import java.util.concurrent.TimeUnit
 
-@Suppress("unused")
-class JellyfinApplication : Application() {
+class JellyfinApplication : Application(), Configuration.Provider {
+	override val workManagerConfiguration: Configuration
+		get() = Configuration.Builder().build()
+
 	override fun onCreate() {
 		super.onCreate()
 

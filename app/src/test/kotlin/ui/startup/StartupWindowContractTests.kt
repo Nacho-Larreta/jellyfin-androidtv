@@ -51,10 +51,20 @@ class StartupWindowContractTests : FunSpec({
 		staticSurface.getAttributeNS(ANDROID_NAMESPACE, "background") shouldBe "@drawable/startup_window"
 		staticSurface.getAttributeNS(ANDROID_NAMESPACE, "importantForAccessibility") shouldBe "no"
 
-		val composeBackground = startupLayout.getElementsByTagName("androidx.compose.ui.platform.ComposeView")
+		startupLayout.getElementsByTagName("androidx.compose.ui.platform.ComposeView").length shouldBe 0
+		val startupHosts = startupLayout.getElementsByTagName("FrameLayout")
 			.asElementSequence()
-			.first { it.getAttributeNS(ANDROID_NAMESPACE, "id") == "@+id/background" }
-		composeBackground.getAttributeNS(ANDROID_NAMESPACE, "visibility") shouldBe "invisible"
+			.associateBy { it.getAttributeNS(ANDROID_NAMESPACE, "id") }
+		val backgroundHost = requireNotNull(startupHosts["@+id/background"])
+		backgroundHost.getAttributeNS(ANDROID_NAMESPACE, "visibility") shouldBe "invisible"
+		backgroundHost.getAttributeNS(ANDROID_NAMESPACE, "focusable") shouldBe "false"
+		backgroundHost.getAttributeNS(ANDROID_NAMESPACE, "descendantFocusability") shouldBe "blocksDescendants"
+		backgroundHost.getAttributeNS(ANDROID_NAMESPACE, "importantForAccessibility") shouldBe "noHideDescendants"
+		val screensaverHost = requireNotNull(startupHosts["@+id/screensaver"])
+		screensaverHost.getAttributeNS(ANDROID_NAMESPACE, "visibility") shouldBe "gone"
+		screensaverHost.getAttributeNS(ANDROID_NAMESPACE, "focusable") shouldBe "false"
+		screensaverHost.getAttributeNS(ANDROID_NAMESPACE, "descendantFocusability") shouldBe "blocksDescendants"
+		screensaverHost.getAttributeNS(ANDROID_NAMESPACE, "importantForAccessibility") shouldBe "noHideDescendants"
 
 		val tvThemes = parseXml(File(projectRoot, "app/src/main/res/values-v31/theme_jellyfin.xml"))
 		val tvStartupTheme = tvThemes.getElementsByTagName("style")

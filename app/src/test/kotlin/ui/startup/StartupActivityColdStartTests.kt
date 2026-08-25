@@ -6,6 +6,8 @@ import android.content.Intent
 import android.os.Build
 import android.os.Looper
 import android.view.View
+import android.view.ViewGroup
+import android.widget.FrameLayout
 import androidx.compose.ui.platform.ComposeView
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentFactory
@@ -56,19 +58,21 @@ import java.util.UUID
 @Config(application = Application::class, sdk = [Build.VERSION_CODES.UPSIDE_DOWN_CAKE])
 class StartupActivityColdStartTests {
 	private val probe = ColdStartProbe()
+	private lateinit var sessionRepository: SessionlessSessionRepository
 
 	@Before
 	fun setUp() {
 		stopKoin()
 		val application: Application = RuntimeEnvironment.getApplication()
 		val userPreferences = UserPreferences(application)
+		sessionRepository = SessionlessSessionRepository()
 
 		startKoin {
 			androidContext(application)
 			modules(module {
 				single { userPreferences }
 				single { createBackgroundService(application, userPreferences) }
-				single<SessionRepository> { SessionlessSessionRepository() }
+				single<SessionRepository> { sessionRepository }
 				single<NotificationsRepository> { EmptyNotificationsRepository() }
 				single<MediaManager> { probe.resolvePlayback() }
 				factory { NoSessionStartupRouter(probe::lastServerId) }
@@ -107,19 +111,35 @@ class StartupActivityColdStartTests {
 
 			val activity = controller.get()
 			val root = activity.findViewById<View>(R.id.startup_root)
-			val composeBackground = activity.findViewById<ComposeView>(R.id.background)
+			val backgroundHost = activity.findViewById<FrameLayout>(R.id.background)
 			val staticSurface = activity.findViewById<View>(R.id.startup_surface)
 			val startupObserver = root.viewTreeObserver
 
 			assertEquals(0, probe.lastServerRequests)
-			assertEquals(View.INVISIBLE, composeBackground.visibility)
+			assertEquals(0, root.composeViewCount())
+			assertEquals(View.INVISIBLE, backgroundHost.visibility)
 			assertEquals(View.VISIBLE, staticSurface.visibility)
 
 			startupObserver.dispatchOnPreDraw()
+
+			assertEquals(0, root.composeViewCount())
+			assertEquals(0, probe.lastServerRequests)
+
 			controller.visible()
 			shadowOf(Looper.getMainLooper()).idle()
 
-			assertEquals(View.VISIBLE, composeBackground.visibility)
+			assertEquals(1, backgroundHost.composeViewCount())
+			assertEquals(1, backgroundHost.childCount)
+			val composeBackground = backgroundHost.getChildAt(0) as ComposeView
+			assertEquals(ViewGroup.LayoutParams.MATCH_PARENT, composeBackground.layoutParams.width)
+			assertEquals(ViewGroup.LayoutParams.MATCH_PARENT, composeBackground.layoutParams.height)
+			assertEquals(false, composeBackground.isFocusable)
+			assertEquals(ViewGroup.FOCUS_BLOCK_DESCENDANTS, composeBackground.descendantFocusability)
+			assertEquals(
+				View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS,
+				composeBackground.importantForAccessibility,
+			)
+			assertEquals(View.VISIBLE, backgroundHost.visibility)
 			assertEquals(1, probe.lastServerRequests)
 
 			repeat(3) {
@@ -128,11 +148,63 @@ class StartupActivityColdStartTests {
 			}
 
 			assertEquals(1, probe.lastServerRequests)
+			assertEquals(1, backgroundHost.composeViewCount())
 			assertEquals(0, probe.playbackResolutions)
 			assertEquals(null, activity.findViewById<View>(R.id.startup_surface))
 			assertTrue(
 				controller.get().supportFragmentManager.fragments.any { it is SelectServerFragment }
 			)
+		}
+	}
+
+	@Test
+	fun `deferred background attachment preserves the current focus owner`() {
+		sessionRepository.pauseRouting()
+		val application: Application = RuntimeEnvironment.getApplication()
+		shadowOf(application).grantPermissions(
+			Manifest.permission.INTERNET,
+			Manifest.permission.ACCESS_NETWORK_STATE,
+		)
+		val intent = Intent(application, StartupActivity::class.java)
+			.putExtra(StartupActivity.EXTRA_HIDE_SPLASH, true)
+
+		Robolectric.buildActivity(StartupActivity::class.java, intent).use { controller ->
+			controller.create()
+			controller.start()
+			controller.resume()
+
+			val activity = controller.get()
+			val root = activity.findViewById<View>(R.id.startup_root)
+			val backgroundHost = activity.findViewById<FrameLayout>(R.id.background)
+			val contentHost = activity.findViewById<ViewGroup>(R.id.content_view)
+			val focusOwner = View(activity).apply {
+				isFocusable = true
+				isFocusableInTouchMode = true
+			}
+			contentHost.addView(focusOwner)
+			assertTrue(focusOwner.requestFocus())
+			assertEquals(focusOwner, root.findFocus())
+
+			root.viewTreeObserver.dispatchOnPreDraw()
+
+			assertEquals(0, root.composeViewCount())
+			assertEquals(focusOwner, root.findFocus())
+
+			controller.visible()
+			shadowOf(Looper.getMainLooper()).idle()
+
+			assertEquals(1, backgroundHost.composeViewCount())
+			assertEquals(focusOwner, root.findFocus())
+			assertEquals(0, probe.lastServerRequests)
+
+			repeat(3) {
+				root.viewTreeObserver.dispatchOnPreDraw()
+				shadowOf(Looper.getMainLooper()).idle()
+			}
+
+			assertEquals(1, backgroundHost.composeViewCount())
+			assertEquals(focusOwner, root.findFocus())
+			assertEquals(0, probe.lastServerRequests)
 		}
 	}
 
@@ -146,6 +218,12 @@ class StartupActivityColdStartTests {
 		userPreferences = userPreferences,
 		imageLoader = mockk<ImageLoader>(relaxed = true),
 	)
+}
+
+private fun View.composeViewCount(): Int = when (this) {
+	is ComposeView -> 1
+	is ViewGroup -> (0 until childCount).sumOf { getChildAt(it).composeViewCount() }
+	else -> 0
 }
 
 private class ColdStartProbe {
@@ -173,7 +251,12 @@ private class StartupFragmentFactory : FragmentFactory() {
 
 private class SessionlessSessionRepository : SessionRepository {
 	override val currentSession: StateFlow<Session?> = MutableStateFlow(null)
-	override val state: StateFlow<SessionRepositoryState> = MutableStateFlow(SessionRepositoryState.READY)
+	private val mutableState = MutableStateFlow(SessionRepositoryState.READY)
+	override val state: StateFlow<SessionRepositoryState> = mutableState
+
+	fun pauseRouting() {
+		mutableState.value = SessionRepositoryState.RESTORING_SESSION
+	}
 
 	override suspend fun restoreSession(destroyOnly: Boolean) = unexpectedCall()
 	override suspend fun switchCurrentSession(serverId: UUID, userId: UUID) = unexpectedCall()

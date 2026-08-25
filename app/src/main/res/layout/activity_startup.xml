@@ -8,12 +8,13 @@
     android:fitsSystemWindows="true"
     tools:context=".ui.startup.StartupActivity">
 
-    <androidx.compose.ui.platform.ComposeView
+    <FrameLayout
         android:id="@+id/background"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:descendantFocusability="blocksDescendants"
         android:focusable="false"
+        android:importantForAccessibility="noHideDescendants"
         android:visibility="invisible" />
 
     <LinearLayout
@@ -22,10 +23,13 @@
         android:layout_height="match_parent"
         android:orientation="vertical" />
 
-    <androidx.compose.ui.platform.ComposeView
+    <FrameLayout
         android:id="@+id/screensaver"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:descendantFocusability="blocksDescendants"
+        android:focusable="false"
+        android:importantForAccessibility="noHideDescendants"
         android:visibility="gone" />
 
     <View
