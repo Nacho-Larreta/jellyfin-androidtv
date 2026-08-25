@@ -1,17 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/startup_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@color/not_quite_black"
     android:fitsSystemWindows="true"
-    tools:context=".ui.startup.MainActivity">
+    tools:context=".ui.startup.StartupActivity">
 
     <androidx.compose.ui.platform.ComposeView
         android:id="@+id/background"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:descendantFocusability="blocksDescendants"
-        android:focusable="false" />
+        android:focusable="false"
+        android:visibility="invisible" />
 
     <LinearLayout
         android:id="@+id/content_view"
@@ -22,5 +25,14 @@
     <androidx.compose.ui.platform.ComposeView
         android:id="@+id/screensaver"
         android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
+    <View
+        android:id="@+id/startup_surface"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/startup_window"
+        android:focusable="false"
+        android:importantForAccessibility="no" />
 </RelativeLayout>

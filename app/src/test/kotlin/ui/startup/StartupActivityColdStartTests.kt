@@ -5,6 +5,8 @@ import android.app.Application
 import android.content.Intent
 import android.os.Build
 import android.os.Looper
+import android.view.View
+import androidx.compose.ui.platform.ComposeView
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentFactory
 import coil3.ImageLoader
@@ -13,6 +15,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.emptyFlow
+import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.auth.model.Server
 import org.jellyfin.androidtv.auth.model.ServerAdditionState
 import org.jellyfin.androidtv.auth.repository.AuthenticationRepository
@@ -87,7 +90,7 @@ class StartupActivityColdStartTests {
 	}
 
 	@Test
-	fun `sessionless cold start routes without resolving playback`() {
+	fun `sessionless cold start draws static surface before starting Compose and routing`() {
 		val application: Application = RuntimeEnvironment.getApplication()
 		shadowOf(application).grantPermissions(
 			Manifest.permission.INTERNET,
@@ -100,8 +103,25 @@ class StartupActivityColdStartTests {
 			controller.create()
 			controller.get().supportFragmentManager.fragmentFactory = StartupFragmentFactory()
 			controller.start()
+			controller.resume()
+
+			val activity = controller.get()
+			val root = activity.findViewById<View>(R.id.startup_root)
+			val composeBackground = activity.findViewById<ComposeView>(R.id.background)
+			val staticSurface = activity.findViewById<View>(R.id.startup_surface)
+			val startupObserver = root.viewTreeObserver
+
+			assertEquals(0, probe.lastServerRequests)
+			assertEquals(View.INVISIBLE, composeBackground.visibility)
+			assertEquals(View.VISIBLE, staticSurface.visibility)
+
+			startupObserver.dispatchOnPreDraw()
+			controller.visible()
 			shadowOf(Looper.getMainLooper()).idle()
-			controller.resume().visible()
+
+			assertEquals(View.VISIBLE, composeBackground.visibility)
+			assertEquals(1, probe.lastServerRequests)
+
 			repeat(3) {
 				shadowOf(Looper.getMainLooper()).idle()
 				controller.get().supportFragmentManager.executePendingTransactions()
@@ -109,6 +129,7 @@ class StartupActivityColdStartTests {
 
 			assertEquals(1, probe.lastServerRequests)
 			assertEquals(0, probe.playbackResolutions)
+			assertEquals(null, activity.findViewById<View>(R.id.startup_surface))
 			assertTrue(
 				controller.get().supportFragmentManager.fragments.any { it is SelectServerFragment }
 			)

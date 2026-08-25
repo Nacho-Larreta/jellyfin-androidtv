@@ -5,6 +5,7 @@ import android.content.Context
 import org.acra.ACRA
 import org.acra.ReportField
 import org.acra.config.CoreConfiguration
+import org.acra.config.CoreConfigurationBuilder
 import org.acra.config.toast
 import org.acra.data.CrashReportData
 import org.acra.ktx.initAcra
@@ -29,6 +30,22 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 object TelemetryService {
+	private val crashReportContent = listOf(
+		ReportField.STACK_TRACE,
+		ReportField.LOGCAT,
+		ReportField.APP_VERSION_NAME,
+		ReportField.APP_VERSION_CODE,
+		ReportField.PACKAGE_NAME,
+		ReportField.BUILD,
+		ReportField.BUILD_CONFIG,
+		ReportField.ANDROID_VERSION,
+		ReportField.BRAND,
+		ReportField.PRODUCT,
+		ReportField.PHONE_MODEL,
+		ReportField.USER_APP_START_DATE,
+		ReportField.USER_CRASH_DATE,
+	)
+
 	/**
 	 * Call in the attachBaseContext function of the application.
 	 */
@@ -39,11 +56,16 @@ object TelemetryService {
 			sharedPreferencesName = TelemetryPreferences.SHARED_PREFERENCES_NAME
 			pluginLoader = AcraPluginLoader(AcraReportSenderFactory::class.java)
 			applicationLogFileLines = 250
+			configureReportContent(this)
 
 			toast {
 				text = context.getString(R.string.crash_report_toast)
 			}
 		}
+	}
+
+	internal fun configureReportContent(configuration: CoreConfigurationBuilder) {
+		configuration.reportContent = crashReportContent
 	}
 
 	class AcraPluginLoader(vararg plugins: Class<out Plugin>) : PluginLoader {

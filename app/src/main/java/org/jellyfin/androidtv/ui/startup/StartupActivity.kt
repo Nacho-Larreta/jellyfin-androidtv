@@ -71,6 +71,7 @@ class StartupActivity : FragmentActivity(), ProfileSelectorFragment.Host {
 	private val itemLauncher: ItemLauncher by inject()
 
 	private lateinit var binding: ActivityStartupBinding
+	private var firstFrameCoordinator: StartupFirstFrameCoordinator? = null
 	private var openedForProfileSelector = false
 	private var profileSelectorRequestConsumed = false
 	private var profileSelectedFromSelector = false
@@ -94,11 +95,21 @@ class StartupActivity : FragmentActivity(), ProfileSelectorFragment.Host {
 		applyTheme()
 
 		super.onCreate(savedInstanceState)
+		window.setBackgroundDrawableResource(R.drawable.startup_window)
 
 		binding = ActivityStartupBinding.inflate(layoutInflater)
-		binding.background.setContent { AppBackground() }
-		binding.screensaver.isVisible = false
 		setContentView(binding.root)
+
+		firstFrameCoordinator = StartupFirstFrameCoordinator(
+			root = binding.root,
+			startContent = ::startContentAfterFirstFrame,
+			revealContent = ::removeStaticStartupSurface,
+		).also(StartupFirstFrameCoordinator::install)
+	}
+
+	private fun startContentAfterFirstFrame() {
+		binding.background.setContent { AppBackground() }
+		binding.background.isVisible = true
 
 		openedForProfileSelector = intent.getBooleanExtra(EXTRA_OPEN_PROFILE_SELECTOR, false)
 
@@ -106,6 +117,18 @@ class StartupActivity : FragmentActivity(), ProfileSelectorFragment.Host {
 
 		// Ensure basic permissions
 		networkPermissionsRequester.launch(arrayOf(Manifest.permission.INTERNET, Manifest.permission.ACCESS_NETWORK_STATE))
+	}
+
+	private fun removeStaticStartupSurface() {
+		window.setBackgroundDrawableResource(R.color.not_quite_black)
+		binding.root.removeView(binding.startupSurface)
+		firstFrameCoordinator = null
+	}
+
+	override fun onDestroy() {
+		firstFrameCoordinator?.cancel()
+		firstFrameCoordinator = null
+		super.onDestroy()
 	}
 
 	override fun onResume() {
