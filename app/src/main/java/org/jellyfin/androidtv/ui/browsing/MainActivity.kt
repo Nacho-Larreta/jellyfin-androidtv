@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.auth.repository.SessionRepository
+import org.jellyfin.androidtv.auth.repository.SessionRepositoryState
 import org.jellyfin.androidtv.auth.repository.UserRepository
 import org.jellyfin.androidtv.integration.LeanbackChannelWorker
 import org.jellyfin.androidtv.ui.InteractionTrackerViewModel
@@ -92,8 +93,11 @@ class MainActivity : FragmentActivity() {
 	}
 
 	private fun validateAuthentication(): Boolean {
-		if (sessionRepository.currentSession.value == null || userRepository.currentUser.value == null) {
-			Timber.w("Activity ${this::class.qualifiedName} started without a session, bouncing to StartupActivity")
+		if (sessionRepository.state.value != SessionRepositoryState.READY ||
+			sessionRepository.currentSession.value == null ||
+			userRepository.currentUser.value == null
+		) {
+			Timber.w("Activity ${this::class.qualifiedName} started without a ready session, bouncing to StartupActivity")
 			startActivity(Intent(this, StartupActivity::class.java))
 			finish()
 			return false

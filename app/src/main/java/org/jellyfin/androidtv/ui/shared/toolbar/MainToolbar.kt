@@ -22,6 +22,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -50,6 +51,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImagePainter
 import coil3.compose.rememberAsyncImagePainter
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.auth.repository.ProfileSelectorRepository
 import org.jellyfin.androidtv.auth.repository.SessionRepository
@@ -66,7 +68,6 @@ import org.jellyfin.androidtv.ui.itemhandling.ItemLauncher
 import org.jellyfin.androidtv.ui.navigation.ActivityDestinations
 import org.jellyfin.androidtv.ui.navigation.Destinations
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository
-import org.jellyfin.androidtv.ui.playback.MediaManager
 import org.jellyfin.androidtv.ui.shared.jellyflixNavigationLabel
 import org.jellyfin.androidtv.ui.shared.jellyflixPrimaryNavigationViews
 import org.jellyfin.androidtv.util.apiclient.getUrl
@@ -125,8 +126,8 @@ private fun MainToolbar(
 	showFocusVisuals: Boolean = true,
 ) {
 	val focusRequester = externalFocusRequester ?: remember { FocusRequester() }
+	val coroutineScope = rememberCoroutineScope()
 	val navigationRepository = koinInject<NavigationRepository>()
-	val mediaManager = koinInject<MediaManager>()
 	val profileSelectorRepository = koinInject<ProfileSelectorRepository>()
 	val sessionRepository = koinInject<SessionRepository>()
 	val userViewsRepository = koinInject<UserViewsRepository>()
@@ -156,29 +157,22 @@ private fun MainToolbar(
 	)
 	val openProfileSelector = {
 		if (activeButton != MainToolbarActiveButton.User) {
-			mediaManager.clearAudioQueue()
-
-			if (profileSelectorRepository.supportsProfileSelector(currentSession)) {
-				activity?.let { currentActivity ->
-					currentActivity.startActivity(
-						ActivityDestinations.startup(
-							context = currentActivity,
-							hideSplash = true,
-							openProfileSelector = true,
+			coroutineScope.launch {
+				ProfileSelectionCommand(
+					supportsProfileSelector = { profileSelectorRepository.supportsProfileSelector(currentSession) },
+					prepareForProfileSelection = sessionRepository::prepareForProfileSelection,
+					openStartup = { openProfileSelector ->
+						activity?.startActivity(
+							ActivityDestinations.startup(
+								context = activity,
+								hideSplash = openProfileSelector,
+								openProfileSelector = openProfileSelector,
+							)
 						)
-					)
-				}
-			} else {
-				sessionRepository.destroyCurrentSession()
-
-				activity?.let { currentActivity ->
-					currentActivity.startActivity(
-						ActivityDestinations.startup(
-							context = currentActivity,
-						)
-					)
-					currentActivity.finishAfterTransition()
-				}
+					},
+					destroySession = sessionRepository::destroyCurrentSession,
+					finishActivity = { activity?.finishAfterTransition() },
+				).execute()
 			}
 		}
 	}
@@ -479,5 +473,24 @@ private fun handleToolbarKey(
 		}
 
 		else -> false
+	}
+}
+
+internal class ProfileSelectionCommand(
+	private val supportsProfileSelector: () -> Boolean,
+	private val prepareForProfileSelection: suspend () -> Unit,
+	private val openStartup: (openProfileSelector: Boolean) -> Unit,
+	private val destroySession: suspend () -> Unit,
+	private val finishActivity: () -> Unit,
+) {
+	suspend fun execute() {
+		if (supportsProfileSelector()) {
+			prepareForProfileSelection()
+			openStartup(true)
+		} else {
+			destroySession()
+			openStartup(false)
+			finishActivity()
+		}
 	}
 }

@@ -74,8 +74,11 @@ class ProfileSelectorFragment : Fragment() {
 		binding.users.windowAlignment = BaseGridView.WINDOW_ALIGN_BOTH_EDGE
 		binding.cancelButton.isVisible = false
 		binding.signOutButton.setOnClickListener {
-			sessionRepository.currentSession.value?.let(profileSelectorRepository::signOut)
-			sessionRepository.destroyCurrentSession()
+			val session = sessionRepository.currentSession.value ?: return@setOnClickListener
+			viewLifecycleOwner.lifecycleScope.launch {
+				sessionRepository.destroyCurrentSession()
+				profileSelectorRepository.signOut(session)
+			}
 		}
 
 		return binding.root

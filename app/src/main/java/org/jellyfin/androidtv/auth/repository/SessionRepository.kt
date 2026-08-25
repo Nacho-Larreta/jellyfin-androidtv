@@ -21,6 +21,7 @@ import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.exception.ApiClientException
 import org.jellyfin.sdk.api.client.extensions.clientLogApi
 import org.jellyfin.sdk.api.client.extensions.userApi
+import org.jellyfin.sdk.model.ClientInfo
 import org.jellyfin.sdk.model.DeviceInfo
 import org.jellyfin.sdk.model.serializer.toUUIDOrNull
 import timber.log.Timber
@@ -38,6 +39,7 @@ enum class SessionRepositoryState {
 	READY,
 	RESTORING_SESSION,
 	SWITCHING_SESSION,
+	INVALIDATING_SESSION,
 }
 
 interface SessionRepository {
@@ -47,7 +49,8 @@ interface SessionRepository {
 	suspend fun restoreSession(destroyOnly: Boolean)
 	suspend fun switchCurrentSession(serverId: UUID, userId: UUID): Boolean
 	suspend fun switchCurrentSession(session: Session): Boolean
-	fun destroyCurrentSession()
+	suspend fun prepareForProfileSelection()
+	suspend fun destroyCurrentSession()
 }
 
 class SessionRepositoryImpl(
@@ -59,6 +62,7 @@ class SessionRepositoryImpl(
 	private val userRepository: UserRepository,
 	private val serverRepository: ServerRepository,
 	private val telemetryPreferences: TelemetryPreferences,
+	private val playbackQuiescePort: PlaybackQuiescePort,
 ) : SessionRepository {
 	private val currentSessionMutex = Mutex()
 	private val _currentSession = MutableStateFlow<Session?>(null)
@@ -76,13 +80,13 @@ class SessionRepositoryImpl(
 			val autoLoginBehavior = authenticationPreferences[AuthenticationPreferences.autoLoginUserBehavior]
 
 			when {
-				alwaysAuthenticate -> destroyCurrentSession()
-				autoLoginBehavior == DISABLED -> destroyCurrentSession()
-				autoLoginBehavior == LAST_USER && !destroyOnly -> setCurrentSession(createLastUserSession())
+				alwaysAuthenticate -> destroyCurrentSessionLocked()
+				autoLoginBehavior == DISABLED -> destroyCurrentSessionLocked()
+				autoLoginBehavior == LAST_USER && !destroyOnly -> setCurrentSessionLocked(createLastUserSession())
 				autoLoginBehavior == SPECIFIC_USER && !destroyOnly -> {
 					val serverId = authenticationPreferences[AuthenticationPreferences.autoLoginServerId].toUUIDOrNull()
 					val userId = authenticationPreferences[AuthenticationPreferences.autoLoginUserId].toUUIDOrNull()
-					if (serverId != null && userId != null) setCurrentSession(createUserSession(serverId, userId))
+					if (serverId != null && userId != null) setCurrentSessionLocked(createUserSession(serverId, userId))
 				}
 			}
 
@@ -100,31 +104,45 @@ class SessionRepositoryImpl(
 		return switchCurrentSession(session)
 	}
 
-	override suspend fun switchCurrentSession(session: Session): Boolean {
-		// No change in session - don't switch
-		if (currentSession.value == session) {
-			Timber.d("Current session is the same as the requested session")
-			return true
+	override suspend fun switchCurrentSession(session: Session): Boolean = withContext(NonCancellable) {
+		currentSessionMutex.withLock {
+			// No change in session - don't switch
+			if (currentSession.value == session) {
+				Timber.d("Current session is the same as the requested session")
+				return@withLock true
+			}
+
+			_state.value = SessionRepositoryState.SWITCHING_SESSION
+			Timber.i("Switching current session to user ${session.userId}")
+
+			val switched = setCurrentSessionLocked(session)
+			_state.value = SessionRepositoryState.READY
+			switched
 		}
-
-		_state.value = SessionRepositoryState.SWITCHING_SESSION
-		Timber.i("Switching current session to user ${session.userId}")
-
-		val switched = setCurrentSession(session)
-		_state.value = SessionRepositoryState.READY
-		return switched
 	}
 
-	override fun destroyCurrentSession() {
+	override suspend fun prepareForProfileSelection(): Unit = withContext(NonCancellable) {
+		currentSessionMutex.withLock {
+			playbackQuiescePort.quiesceIfCreated()
+		}
+	}
+
+	override suspend fun destroyCurrentSession(): Unit = withContext(NonCancellable) {
+		currentSessionMutex.withLock {
+			destroyCurrentSessionLocked()
+		}
+	}
+
+	private suspend fun destroyCurrentSessionLocked() {
 		Timber.i("Destroying current session")
 
-		userRepository.setCurrentUser(null)
-		serverRepository.setCurrentServer(null)
-		_currentSession.value = null
+		_state.value = SessionRepositoryState.INVALIDATING_SESSION
+		playbackQuiescePort.quiesceIfCreated()
+		setCurrentSessionLocked(null)
 		_state.value = SessionRepositoryState.READY
 	}
 
-	private suspend fun setCurrentSession(session: Session?): Boolean {
+	private suspend fun setCurrentSessionLocked(session: Session?): Boolean {
 		var server: Server? = null
 
 		if (session != null) {
@@ -142,6 +160,7 @@ class SessionRepositoryImpl(
 		val deviceInfo = session?.let { defaultDeviceInfo.forUser(it.userId) } ?: defaultDeviceInfo
 		Timber.i("Updating current session. userId=${session?.userId} server=${server?.serverVersion}")
 
+		val previousApiBinding = captureApiClientBinding()
 		val applied = userApiClient.applySession(session, deviceInfo)
 		if (applied && session != null) {
 			try {
@@ -152,7 +171,9 @@ class SessionRepositoryImpl(
 				serverRepository.setCurrentServer(server)
 			} catch (err: ApiClientException) {
 				Timber.e(err, "Unable to authenticate: bad response when getting user info")
-				destroyCurrentSession()
+				_state.value = SessionRepositoryState.INVALIDATING_SESSION
+				restoreApiClientBinding(previousApiBinding)
+				destroyCurrentSessionLocked()
 				return false
 			}
 
@@ -163,11 +184,38 @@ class SessionRepositoryImpl(
 		} else {
 			userRepository.setCurrentUser(null)
 			serverRepository.setCurrentServer(null)
+			telemetryPreferences[TelemetryPreferences.crashReportUrl] = ""
+			telemetryPreferences[TelemetryPreferences.crashReportToken] = ""
 		}
 		preferencesRepository.onSessionChanged()
 		_currentSession.value = session
 
 		return true
+	}
+
+	private fun captureApiClientBinding() = if (_currentSession.value == null) {
+		ApiClientBindingSnapshot(
+			baseUrl = null,
+			accessToken = null,
+			clientInfo = userApiClient.clientInfo,
+			deviceInfo = defaultDeviceInfo,
+		)
+	} else {
+		ApiClientBindingSnapshot(
+			baseUrl = userApiClient.baseUrl,
+			accessToken = userApiClient.accessToken,
+			clientInfo = userApiClient.clientInfo,
+			deviceInfo = userApiClient.deviceInfo,
+		)
+	}
+
+	private fun restoreApiClientBinding(binding: ApiClientBindingSnapshot) {
+		userApiClient.update(
+			baseUrl = binding.baseUrl,
+			accessToken = binding.accessToken,
+			clientInfo = binding.clientInfo,
+			deviceInfo = binding.deviceInfo,
+		)
 	}
 
 	private fun createLastUserSession(): Session? {
@@ -226,3 +274,10 @@ class SessionRepositoryImpl(
 		return true
 	}
 }
+
+private data class ApiClientBindingSnapshot(
+	val baseUrl: String?,
+	val accessToken: String?,
+	val clientInfo: ClientInfo,
+	val deviceInfo: DeviceInfo,
+)

@@ -10,14 +10,17 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.auth.repository.PlaybackQuiescePort
 import org.jellyfin.androidtv.preference.UserPreferences
 import org.jellyfin.androidtv.preference.UserSettingPreferences
 import org.jellyfin.androidtv.ui.browsing.MainActivity
 import org.jellyfin.androidtv.ui.playback.MediaManager
 import org.jellyfin.androidtv.ui.playback.PlaybackLauncher
+import org.jellyfin.androidtv.ui.playback.PlaybackQuiesceRegistry
 import org.jellyfin.androidtv.ui.playback.VideoQueueManager
 import org.jellyfin.androidtv.ui.playback.rewrite.RewriteMediaManager
 import org.jellyfin.androidtv.util.profile.createDeviceProfile
+import org.jellyfin.playback.core.PlaybackManager
 import org.jellyfin.playback.core.playbackManager
 import org.jellyfin.playback.jellyfin.jellyfinPlugin
 import org.jellyfin.playback.media3.exoplayer.ExoPlayerOptions
@@ -34,9 +37,15 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import org.jellyfin.androidtv.ui.playback.PlaybackManager as LegacyPlaybackManager
 
-val playbackModule = module {
+val playbackModule = createPlaybackModule()
+
+internal fun createPlaybackModule(
+	playbackManagerFactory: Scope.() -> PlaybackManager = { createPlaybackManager() },
+) = module {
 	single { LegacyPlaybackManager(get()) }
 	single { VideoQueueManager() }
+	single { PlaybackQuiesceRegistry() }
+	single<PlaybackQuiescePort> { get<PlaybackQuiesceRegistry>() }
 	single<MediaManager> { RewriteMediaManager(get(), get()) }
 
 	single { PlaybackLauncher(get(), get(), get(), get()) }
@@ -50,8 +59,12 @@ val playbackModule = module {
 
 		OkHttpDataSource.Factory(okHttpFactory.createClient(httpClientOptions))
 	}
-
-	single { createPlaybackManager() }
+	single {
+		val registry = get<PlaybackQuiesceRegistry>()
+		playbackManagerFactory().apply {
+			registry.register(state::stop)
+		}
+	}
 }
 
 fun Scope.createPlaybackManager() = playbackManager(androidContext()) {
