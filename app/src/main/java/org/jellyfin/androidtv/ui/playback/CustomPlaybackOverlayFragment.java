@@ -663,13 +663,17 @@ public class CustomPlaybackOverlayFragment extends Fragment implements LiveTvGui
                         }
                     }
 
+                    View currentFocus = requireActivity().getCurrentFocus();
+                    boolean progressFocused = currentFocus != null
+                            && currentFocus.getId() == androidx.leanback.R.id.playback_progress;
                     PlayerRemoteActivationAction activationAction = PlayerRemoteInputPolicy.activationAction(
                             new PlayerRemoteInputState(
                                     playbackControllerContainer.getValue().getPlaybackController().isLiveTv(),
                                     mPopupPanelVisible,
                                     mGuideVisible,
                                     activeDialog != null && activeDialog.isShowing(),
-                                    leanbackOverlayFragment.isControlsOverlayVisible()
+                                    leanbackOverlayFragment.isControlsOverlayVisible(),
+                                    progressFocused
                             )
                     );
                     if (activationAction == PlayerRemoteActivationAction.TogglePlayback) {

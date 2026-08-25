@@ -11,6 +11,7 @@ data class PlayerRemoteInputState @JvmOverloads constructor(
 	val guideVisible: Boolean = false,
 	val dialogVisible: Boolean = false,
 	val controlsVisible: Boolean = false,
+	val progressFocused: Boolean = false,
 )
 
 enum class PlayerRemoteDirectionalAction {
@@ -49,7 +50,7 @@ object PlayerRemoteInputPolicy {
 
 	@JvmStatic
 	fun activationAction(state: PlayerRemoteInputState): PlayerRemoteActivationAction =
-		if (state.controlsVisible) {
+		if (state.controlsVisible || state.progressFocused) {
 			PlayerRemoteActivationAction.PassThrough
 		} else {
 			PlayerRemoteActivationAction.TogglePlayback

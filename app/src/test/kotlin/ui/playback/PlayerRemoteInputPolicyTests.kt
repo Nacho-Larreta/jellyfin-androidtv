@@ -37,6 +37,13 @@ class PlayerRemoteInputPolicyTests : FunSpec({
 		PlayerRemoteInputPolicy.activationAction(
 			PlayerRemoteInputState(controlsVisible = true),
 		) shouldBe PlayerRemoteActivationAction.PassThrough
+
+		PlayerRemoteInputPolicy.activationAction(
+			PlayerRemoteInputState(
+				controlsVisible = false,
+				progressFocused = true,
+			),
+		) shouldBe PlayerRemoteActivationAction.PassThrough
 	}
 
 	test("Live TV popup guide and dialog preserve their native handlers") {
@@ -79,11 +86,12 @@ class PlayerRemoteInputPolicyTests : FunSpec({
 			Path.of("src/main/java/org/jellyfin/androidtv/ui/playback/CustomPlaybackOverlayFragment.java"),
 		).first { Files.exists(it) }
 		val hiddenControlsBody = sourcePath.toFile().readText()
-			.substringAfter("PlayerRemoteActivationAction activationAction")
+			.substringAfter("View currentFocus")
 			.substringBefore("//and then manage our fade timer")
 
 		hiddenControlsBody shouldContain "PlayerRemoteInputPolicy.activationAction"
 		hiddenControlsBody shouldContain "leanbackOverlayFragment.isControlsOverlayVisible()"
+		hiddenControlsBody shouldContain "currentFocus.getId() == androidx.leanback.R.id.playback_progress"
 		hiddenControlsBody shouldContain "PlayerRemoteActivationAction.TogglePlayback"
 		hiddenControlsBody shouldNotContain "if (!mIsVisible)"
 	}
