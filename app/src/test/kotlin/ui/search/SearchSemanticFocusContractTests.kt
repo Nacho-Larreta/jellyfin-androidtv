@@ -25,8 +25,15 @@ class SearchSemanticFocusContractTests : FunSpec({
 
 		source.contains("if (focusReclaimHandshake.reclaim()) return").shouldBeTrue()
 		source.contains("if (focusReclaimHandshake.install(handler))").shouldBeTrue()
-		source.contains("host.post(host::reclaimRemoteFocus)").shouldBeTrue()
+		source.contains("host.scheduleRemoteFocusReclaim()").shouldBeTrue()
 		source.contains("requestFocusFromTouch").shouldBeFalse()
+	}
+
+	test("the Fragment host reclaims focus when the IME releases the app window") {
+		val source = searchFragmentSource()
+
+		source.contains("fun scheduleRemoteFocusReclaim()").shouldBeTrue()
+		source.contains("if (hasWindowFocus) scheduleRemoteFocusReclaim()").shouldBeTrue()
 	}
 })
 

@@ -58,6 +58,11 @@ class SearchFragment : Fragment(), PreDispatchKeyEventHandler {
 			requestFocus()
 		}
 
+		fun scheduleRemoteFocusReclaim() {
+			post(::reclaimRemoteFocus)
+			postDelayed(::reclaimRemoteFocus, REMOTE_FOCUS_RECLAIM_DELAY_MILLIS)
+		}
+
 		override fun dispatchKeyEventPreIme(event: AndroidKeyEvent): Boolean {
 			val keyStroke = event.toRemoteKeyStrokeOrNull()
 			if (keyStroke != null && preImeKeyRouter.route(keyStroke)) return true
@@ -67,7 +72,8 @@ class SearchFragment : Fragment(), PreDispatchKeyEventHandler {
 
 		override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
 			super.onWindowFocusChanged(hasWindowFocus)
-			if (!hasWindowFocus) preImeKeyRouter.reset()
+			if (hasWindowFocus) scheduleRemoteFocusReclaim()
+			else preImeKeyRouter.reset()
 		}
 
 		override fun onDetachedFromWindow() {
@@ -122,10 +128,7 @@ class SearchFragment : Fragment(), PreDispatchKeyEventHandler {
 				ViewGroup.LayoutParams.MATCH_PARENT,
 			),
 		)
-		host.post {
-			host.reclaimRemoteFocus()
-			host.postDelayed(host::reclaimRemoteFocus, REMOTE_FOCUS_RECLAIM_DELAY_MILLIS)
-		}
+		host.scheduleRemoteFocusReclaim()
 		return host
 	}
 
@@ -135,13 +138,7 @@ class SearchFragment : Fragment(), PreDispatchKeyEventHandler {
 		// The search screen owns TV remote navigation. Re-claim focus after
 		// returning from IME, details, or player screens so DPAD events do not
 		// leak to the previously focused Leanback view behind Compose.
-		view?.post {
-			(view as? SearchKeyHost)?.reclaimRemoteFocus()
-			view?.postDelayed(
-				{ (view as? SearchKeyHost)?.reclaimRemoteFocus() },
-				REMOTE_FOCUS_RECLAIM_DELAY_MILLIS,
-			)
-		}
+		(view as? SearchKeyHost)?.scheduleRemoteFocusReclaim()
 	}
 
 	override fun onPreDispatchKeyDown(keyCode: Int): Boolean = handleSearchKeyPressed(keyCode)

@@ -33,8 +33,12 @@ class SearchInputBoundaryReducerTests : FunSpec({
 	}
 
 	test("IME dismissal restores browse focus only after the IME was observed") {
+		val editing = SearchInputBoundaryReducer.reduce(
+			state = SearchInputBoundaryState(),
+			event = SearchInputBoundaryEvent.EditingChanged(editing = true),
+		)
 		val imeShown = SearchInputBoundaryReducer.reduce(
-			state = SearchInputBoundaryState(editing = true),
+			state = editing.state,
 			event = SearchInputBoundaryEvent.ImeVisibilityChanged(visible = true, browseTargetAvailable = true),
 		)
 
