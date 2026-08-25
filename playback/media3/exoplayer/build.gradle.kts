@@ -22,6 +22,7 @@ android {
 
 dependencies {
 	// Jellyfin
+	implementation(projects.logging)
 	implementation(projects.playback.core)
 
 	// Kotlin

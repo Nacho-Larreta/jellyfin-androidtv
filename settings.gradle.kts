@@ -7,6 +7,7 @@ include(":app")
 
 // Modules
 include(":design")
+include(":logging")
 include(":playback:core")
 include(":playback:jellyfin")
 include(":playback:media3:exoplayer")

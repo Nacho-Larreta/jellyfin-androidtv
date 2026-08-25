@@ -146,9 +146,7 @@ class ExternalPlayerActivity : FragmentActivity() {
 		val subtitleLanguages = externalSubtitles.map { it.language.orEmpty() }.toTypedArray()
 
 		Timber.i(
-			"Starting item ${item.id} from $position with ${subtitleUrls.size} external subtitles: $url${
-				subtitleUrls.joinToString(", ", ", ")
-			}"
+			"Starting external playback from $position with ${subtitleUrls.size} external subtitles"
 		)
 
 		val playIntent = Intent(Intent.ACTION_VIEW).apply {

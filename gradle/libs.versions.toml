@@ -123,6 +123,7 @@ aboutlibraries = { module = "com.mikepenz:aboutlibraries-core", version.ref = "a
 
 # Logging
 slf4j-timber = { module = "io.github.unveloper:slf4j-timber", version.ref = "slf4j-timber" }
+slf4j-api = { module = "org.slf4j:slf4j-api", version = "2.0.2" }
 timber = { module = "com.jakewharton.timber:timber", version.ref = "timber" }
 
 # Compatibility (desugaring)

@@ -2,6 +2,7 @@ package org.jellyfin.androidtv
 
 import android.content.Context
 import androidx.startup.Initializer
+import org.jellyfin.androidtv.logging.SanitizingDebugTree
 import timber.log.Timber
 
 class LogInitializer : Initializer<Unit> {
@@ -14,14 +15,14 @@ class LogInitializer : Initializer<Unit> {
 					.getMethod("setEnabled", Boolean::class.javaPrimitiveType)
 					.invoke(null, true)
 			} catch (e: ReflectiveOperationException) {
-				@Suppress("TooGenericExceptionThrown")
-				throw RuntimeException(e)
+				throw IllegalStateException("Unable to enable CloseGuard", e)
 			}
 		}
 
-		// Initialize the logging library
-		Timber.plant(Timber.DebugTree())
-		Timber.i("Debug tree planted")
+		if (BuildConfig.DEBUG) {
+			Timber.plant(SanitizingDebugTree())
+			Timber.i("Sanitizing debug tree planted")
+		}
 	}
 
 	override fun dependencies() = emptyList<Class<out Initializer<*>>>()

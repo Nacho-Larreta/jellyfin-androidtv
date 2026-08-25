@@ -2,6 +2,7 @@ package org.jellyfin.androidtv.util.coil
 
 import android.util.Log
 import coil3.util.Logger
+import org.jellyfin.androidtv.logging.SensitiveLogSanitizer
 import timber.log.Timber
 
 class CoilTimberLogger(
@@ -16,6 +17,8 @@ class CoilTimberLogger(
 			Logger.Level.Error -> Log.ERROR
 		}
 
-		Timber.tag("CoilTimberLogger.$tag").log(priority, throwable, message)
+		val safeTag = SensitiveLogSanitizer.sanitize("CoilTimberLogger.$tag")
+		val safeMessage = SensitiveLogSanitizer.sanitize(message, throwable)
+		Timber.tag(safeTag).log(priority, safeMessage)
 	}
 }

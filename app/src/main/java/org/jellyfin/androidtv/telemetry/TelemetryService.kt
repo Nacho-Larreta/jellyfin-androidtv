@@ -17,6 +17,7 @@ import org.acra.sender.ReportSenderException
 import org.acra.sender.ReportSenderFactory
 import org.jellyfin.androidtv.BuildConfig
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.logging.SensitiveLogSanitizer
 import org.jellyfin.androidtv.preference.TelemetryPreferences
 import org.jellyfin.androidtv.util.appendCodeBlock
 import org.jellyfin.androidtv.util.appendItem
@@ -32,7 +33,7 @@ object TelemetryService {
 	 * Call in the attachBaseContext function of the application.
 	 */
 	fun init(context: Application) {
-		ACRA.DEV_LOGGING = true
+		ACRA.DEV_LOGGING = BuildConfig.DEBUG
 		context.initAcra {
 			buildConfigClass = BuildConfig::class.java
 			sharedPreferencesName = TelemetryPreferences.SHARED_PREFERENCES_NAME
@@ -84,7 +85,7 @@ object TelemetryService {
 			connection.requestMethod = "POST"
 			connection.doOutput = true
 			connection.outputStream.apply {
-				write(errorContent.toReport().toByteArray())
+				write(buildSanitizedReport(errorContent).toByteArray())
 				flush()
 				close()
 			}
@@ -93,6 +94,9 @@ object TelemetryService {
 		} catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
 			throw ReportSenderException("Unable to send crash report to server", e)
 		}
+
+		internal fun buildSanitizedReport(errorContent: CrashReportData): String =
+			SensitiveLogSanitizer.sanitize(errorContent.toReport())
 
 		private fun CrashReportData.toReport(): String = buildMarkdown {
 			// Header
@@ -107,9 +111,11 @@ object TelemetryService {
 
 			// Content
 			appendSection("Logs") {
-				appendItem("Stack Trace") { appendCodeBlock("log", getString(ReportField.STACK_TRACE)) }
+				appendItem("Stack Trace") {
+					appendCodeBlock("log", SensitiveLogSanitizer.sanitize(getString(ReportField.STACK_TRACE)))
+				}
 				appendItem("Logcat") {
-					if (includeLogs) appendCodeBlock("log", getString(ReportField.LOGCAT))
+					if (includeLogs) appendCodeBlock("log", SensitiveLogSanitizer.sanitize(getString(ReportField.LOGCAT)))
 					else append("Logs are disabled")
 				}
 			}

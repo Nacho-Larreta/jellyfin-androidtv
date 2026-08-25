@@ -37,7 +37,6 @@ import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.analytics.AnalyticsListener;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector;
-import androidx.media3.exoplayer.util.EventLogger;
 import androidx.media3.extractor.DefaultExtractorsFactory;
 import androidx.media3.extractor.ExtractorsFactory;
 import androidx.media3.extractor.ts.TsExtractor;
@@ -49,6 +48,7 @@ import org.jellyfin.androidtv.R;
 import org.jellyfin.androidtv.data.compat.StreamInfo;
 import org.jellyfin.androidtv.preference.UserPreferences;
 import org.jellyfin.androidtv.preference.constant.ZoomMode;
+import org.jellyfin.playback.media3.exoplayer.SanitizingEventLogger;
 import org.jellyfin.sdk.api.client.ApiClient;
 import org.jellyfin.sdk.model.api.MediaStream;
 import org.jellyfin.sdk.model.api.MediaStreamType;
@@ -102,7 +102,7 @@ public class VideoManager {
         mExoPlayer = configureExoplayerBuilder(activity, assHandler).build();
 
         if (userPreferences.get(UserPreferences.Companion.getDebuggingEnabled())) {
-            mExoPlayer.addAnalyticsListener(new EventLogger());
+            mExoPlayer.addAnalyticsListener(new SanitizingEventLogger());
         }
 
         // Volume normalisation (audio night mode).
@@ -375,7 +375,7 @@ public class VideoManager {
             Timber.w("Video path is null cannot continue");
             return;
         }
-        Timber.i("Video path set to: %s", path);
+        Timber.i("Preparing internal video stream");
 
         try {
             // Add external subtitles
@@ -392,7 +392,7 @@ public class VideoManager {
                             .setLabel(mediaStream.getDisplayTitle())
                             .setSelectionFlags(getSubtitleSelectionFlags(mediaStream))
                             .build();
-                    Timber.i("Adding subtitle track %s of type %s", subtitleConfiguration.uri, subtitleConfiguration.mimeType);
+                    Timber.i("Adding external subtitle track of type %s", subtitleConfiguration.mimeType);
                     subtitleConfigurations.add(subtitleConfiguration);
                 }
             }
