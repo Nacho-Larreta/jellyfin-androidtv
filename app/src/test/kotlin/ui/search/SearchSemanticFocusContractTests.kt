@@ -23,7 +23,9 @@ class SearchSemanticFocusContractTests : FunSpec({
 	test("the Fragment host delegates focus reclaim to the current Compose owner") {
 		val source = searchFragmentSource()
 
-		source.contains("if (handleSearchFocusReclaim()) return").shouldBeTrue()
+		source.contains("if (focusReclaimHandshake.reclaim()) return").shouldBeTrue()
+		source.contains("if (focusReclaimHandshake.install(handler))").shouldBeTrue()
+		source.contains("host.post(host::reclaimRemoteFocus)").shouldBeTrue()
 		source.contains("requestFocusFromTouch").shouldBeFalse()
 	}
 })

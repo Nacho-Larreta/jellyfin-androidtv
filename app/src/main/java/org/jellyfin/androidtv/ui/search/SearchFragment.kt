@@ -14,6 +14,27 @@ import androidx.fragment.app.Fragment
 import org.jellyfin.androidtv.ui.browsing.PreDispatchKeyEventHandler
 import org.jellyfin.androidtv.ui.input.toRemoteKeyStrokeOrNull
 
+internal class SearchFocusReclaimHandshake {
+	private var handler: (() -> Boolean)? = null
+	private var pending = false
+
+	fun install(handler: () -> Boolean): Boolean {
+		this.handler = handler
+		return pending
+	}
+
+	fun reclaim(): Boolean {
+		val claimed = handler?.invoke() == true
+		pending = !claimed
+		return claimed
+	}
+
+	fun clear() {
+		handler = null
+		pending = false
+	}
+}
+
 class SearchFragment : Fragment(), PreDispatchKeyEventHandler {
 	companion object {
 		const val EXTRA_QUERY = "query"
@@ -24,7 +45,7 @@ class SearchFragment : Fragment(), PreDispatchKeyEventHandler {
 
 	private var handleSearchBackPressed: () -> Boolean = { false }
 	private var handleSearchKeyPressed: (Int) -> Boolean = { false }
-	private var handleSearchFocusReclaim: () -> Boolean = { false }
+	private val focusReclaimHandshake = SearchFocusReclaimHandshake()
 
 	private inner class SearchKeyHost(context: Context) : FrameLayout(context) {
 		private val preImeKeyRouter = SearchPreImeKeyRouter(
@@ -33,7 +54,7 @@ class SearchFragment : Fragment(), PreDispatchKeyEventHandler {
 		)
 
 		fun reclaimRemoteFocus() {
-			if (handleSearchFocusReclaim()) return
+			if (focusReclaimHandshake.reclaim()) return
 			requestFocus()
 		}
 
@@ -74,30 +95,38 @@ class SearchFragment : Fragment(), PreDispatchKeyEventHandler {
 		inflater: LayoutInflater,
 		container: ViewGroup?,
 		savedInstanceState: Bundle?,
-	): View = SearchKeyHost(requireContext()).apply {
-		isFocusable = true
-		isFocusableInTouchMode = true
-		addView(
-			ComposeView(context).apply {
-				setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
-				setContent {
-					SearchScreen(
-						initialQuery = arguments?.getString(EXTRA_QUERY).orEmpty(),
-						onBackPressedHandlerChange = { handleSearchBackPressed = it },
-						onKeyPressedHandlerChange = { handleSearchKeyPressed = it },
-						onFocusReclaimHandlerChange = { handleSearchFocusReclaim = it },
-					)
-				}
-			},
+	): View {
+		val host = SearchKeyHost(requireContext()).apply {
+			isFocusable = true
+			isFocusableInTouchMode = true
+		}
+		val composeView = ComposeView(host.context).apply {
+			setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+			setContent {
+				SearchScreen(
+					initialQuery = arguments?.getString(EXTRA_QUERY).orEmpty(),
+					onBackPressedHandlerChange = { handleSearchBackPressed = it },
+					onKeyPressedHandlerChange = { handleSearchKeyPressed = it },
+					onFocusReclaimHandlerChange = { handler ->
+						if (focusReclaimHandshake.install(handler)) {
+							host.post(host::reclaimRemoteFocus)
+						}
+					},
+				)
+			}
+		}
+		host.addView(
+			composeView,
 			ViewGroup.LayoutParams(
 				ViewGroup.LayoutParams.MATCH_PARENT,
 				ViewGroup.LayoutParams.MATCH_PARENT,
 			),
 		)
-		post {
-			reclaimRemoteFocus()
-			postDelayed(::reclaimRemoteFocus, REMOTE_FOCUS_RECLAIM_DELAY_MILLIS)
+		host.post {
+			host.reclaimRemoteFocus()
+			host.postDelayed(host::reclaimRemoteFocus, REMOTE_FOCUS_RECLAIM_DELAY_MILLIS)
 		}
+		return host
 	}
 
 	override fun onResume() {
@@ -120,7 +149,7 @@ class SearchFragment : Fragment(), PreDispatchKeyEventHandler {
 	override fun onDestroyView() {
 		handleSearchBackPressed = { false }
 		handleSearchKeyPressed = { false }
-		handleSearchFocusReclaim = { false }
+		focusReclaimHandshake.clear()
 		super.onDestroyView()
 	}
 }
