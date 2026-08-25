@@ -672,6 +672,7 @@
     <string name="search_no_results">No results for “%1$s”</string>
     <string name="search_no_results_hint">Try another title, actor, or collection.</string>
     <string name="search_a11y_recent_search">Recent search, %1$s</string>
+    <string name="search_a11y_input">Search input, %1$s</string>
     <string name="search_a11y_genre">Genre %1$s, %2$s</string>
     <string name="search_a11y_collection">Collection, %1$s</string>
     <string name="search_a11y_filter">Filter %1$s, %2$s</string>

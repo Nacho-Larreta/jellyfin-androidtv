@@ -24,6 +24,7 @@ class SearchFragment : Fragment(), PreDispatchKeyEventHandler {
 
 	private var handleSearchBackPressed: () -> Boolean = { false }
 	private var handleSearchKeyPressed: (Int) -> Boolean = { false }
+	private var handleSearchFocusReclaim: () -> Boolean = { false }
 
 	private inner class SearchKeyHost(context: Context) : FrameLayout(context) {
 		private val preImeKeyRouter = SearchPreImeKeyRouter(
@@ -32,8 +33,8 @@ class SearchFragment : Fragment(), PreDispatchKeyEventHandler {
 		)
 
 		fun reclaimRemoteFocus() {
+			if (handleSearchFocusReclaim()) return
 			requestFocus()
-			requestFocusFromTouch()
 		}
 
 		override fun dispatchKeyEventPreIme(event: AndroidKeyEvent): Boolean {
@@ -84,6 +85,7 @@ class SearchFragment : Fragment(), PreDispatchKeyEventHandler {
 						initialQuery = arguments?.getString(EXTRA_QUERY).orEmpty(),
 						onBackPressedHandlerChange = { handleSearchBackPressed = it },
 						onKeyPressedHandlerChange = { handleSearchKeyPressed = it },
+						onFocusReclaimHandlerChange = { handleSearchFocusReclaim = it },
 					)
 				}
 			},
@@ -118,6 +120,7 @@ class SearchFragment : Fragment(), PreDispatchKeyEventHandler {
 	override fun onDestroyView() {
 		handleSearchBackPressed = { false }
 		handleSearchKeyPressed = { false }
+		handleSearchFocusReclaim = { false }
 		super.onDestroyView()
 	}
 }

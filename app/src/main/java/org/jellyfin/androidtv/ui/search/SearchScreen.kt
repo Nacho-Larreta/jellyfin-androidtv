@@ -7,6 +7,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -47,7 +48,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.focusTarget
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -59,13 +59,15 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.vectorResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
@@ -182,6 +184,17 @@ private fun Modifier.searchControlSemantics(
 	onClick(label = actionLabel, action = onActivate)
 }
 
+private fun Modifier.searchSemanticFocusOwner(
+	description: String,
+	actionLabel: String,
+	onActivate: () -> Boolean,
+): Modifier = semantics {
+	contentDescription = description
+	role = Role.Button
+	liveRegion = LiveRegionMode.Polite
+	onClick(label = actionLabel, action = onActivate)
+}.focusable()
+
 private fun rowCount(itemCount: Int, columns: Int) =
 	if (itemCount == 0) 0 else (itemCount + columns - 1) / columns
 
@@ -234,8 +247,10 @@ internal fun SearchScreen(
 	initialQuery: String,
 	onBackPressedHandlerChange: (() -> Boolean) -> Unit = {},
 	onKeyPressedHandlerChange: ((Int) -> Boolean) -> Unit = {},
+	onFocusReclaimHandlerChange: (() -> Boolean) -> Unit = {},
 ) {
 	val context = LocalContext.current
+	val resources = LocalResources.current
 	val viewModel = koinViewModel<SearchViewModel>()
 	val itemLauncher = koinInject<ItemLauncher>()
 	val backgroundService = koinInject<BackgroundService>()
@@ -243,7 +258,6 @@ internal fun SearchScreen(
 	val discovery by viewModel.searchDiscoveryFlow.collectAsState()
 	val focusManager = LocalFocusManager.current
 	val keyboardController = LocalSoftwareKeyboardController.current
-	val view = LocalView.current
 	val toolbarFocusRequester = remember { FocusRequester() }
 	val contentFocusRequester = remember { FocusRequester() }
 	val listState = rememberLazyListState()
@@ -310,9 +324,9 @@ internal fun SearchScreen(
 		.filter { group -> group.items.isNotEmpty() }
 	val totalResults = groups.sumOf { group -> group.items.size }
 	val filters = buildList {
-		add(SearchFilter(context.getString(R.string.search_filter_all), null, totalResults))
+		add(SearchFilter(resources.getString(R.string.search_filter_all), null, totalResults))
 		groups.forEach { group ->
-			add(SearchFilter(context.getString(group.labelRes), group.sourceIndex, group.items.size))
+			add(SearchFilter(resources.getString(group.labelRes), group.sourceIndex, group.items.size))
 		}
 	}
 	val visibleGroups = filters
@@ -475,13 +489,13 @@ internal fun SearchScreen(
 		return true
 	}
 
-	fun requestFocusForSelection(target: SearchSelection) {
+	fun requestFocusForSelection(target: SearchSelection): Boolean = runCatching {
 		when (normalizeSelection(target)) {
-			SearchSelection.Toolbar -> runCatching { toolbarFocusRequester.requestFocus() }
-			SearchSelection.Input -> runCatching { contentFocusRequester.requestFocus() }
-			else -> runCatching { contentFocusRequester.requestFocus() }
+			SearchSelection.Toolbar -> toolbarFocusRequester.requestFocus()
+			SearchSelection.Input -> contentFocusRequester.requestFocus()
+			else -> contentFocusRequester.requestFocus()
 		}
-	}
+	}.getOrDefault(false)
 
 	fun hasBrowseTarget(): Boolean = hasSearchBrowseTarget(
 		query = query,
@@ -590,48 +604,51 @@ internal fun SearchScreen(
 		else -> activateSelection()
 	}
 
-	fun resultCountDescription(count: Int): String = context.resources.getQuantityString(
+	fun resultCountDescription(count: Int): String = resources.getQuantityString(
 		R.plurals.search_result_count,
 		count,
 		count,
 	)
 
-	fun titleCountDescription(count: Int): String = context.resources.getQuantityString(
+	fun titleCountDescription(count: Int): String = resources.getQuantityString(
 		R.plurals.search_title_count,
 		count,
 		count,
 	)
 
 	fun selectionDescription(target: SearchSelection): String? = when (val normalized = normalizeSelection(target)) {
-		SearchSelection.Toolbar,
-		SearchSelection.Input -> null
-		is SearchSelection.RecentSearch -> context.getString(
+		SearchSelection.Toolbar -> null
+		SearchSelection.Input -> resources.getString(
+			R.string.search_a11y_input,
+			query.ifBlank { resources.getString(R.string.search_hint) },
+		)
+		is SearchSelection.RecentSearch -> resources.getString(
 			R.string.search_a11y_recent_search,
 			recentSearches[normalized.index].label,
 		)
-		SearchSelection.ClearHistory -> context.getString(R.string.search_clear_history)
+		SearchSelection.ClearHistory -> resources.getString(R.string.search_clear_history)
 		is SearchSelection.Genre -> {
 			val genre = genreShortcuts[normalized.index]
-			context.getString(R.string.search_a11y_genre, genre.label, titleCountDescription(genre.count))
+			resources.getString(R.string.search_a11y_genre, genre.label, titleCountDescription(genre.count))
 		}
 		is SearchSelection.Trending -> {
 			val trend = trendingSearches[normalized.index]
-			context.getString(R.string.search_a11y_collection, trend.title)
+			resources.getString(R.string.search_a11y_collection, trend.title)
 		}
 		is SearchSelection.Filter -> {
 			val filter = filters[normalized.index]
-			context.getString(R.string.search_a11y_filter, filter.label, resultCountDescription(filter.count))
+			resources.getString(R.string.search_a11y_filter, filter.label, resultCountDescription(filter.count))
 		}
 		SearchSelection.TopResult -> {
 			val item = topResult?.let(::searchRowItem)
-			context.getString(
+			resources.getString(
 				R.string.search_a11y_top_result,
 				item?.getCardName(context) ?: item?.getName(context).orEmpty(),
 			)
 		}
 		is SearchSelection.RowItem -> {
 			val item = visibleGroups[normalized.rowIndex].items[normalized.itemIndex].let(::searchRowItem)
-			context.getString(
+			resources.getString(
 				R.string.search_a11y_result,
 				item.getCardName(context) ?: item.getName(context).orEmpty(),
 			)
@@ -805,10 +822,12 @@ internal fun SearchScreen(
 
 	val currentBackHandler = rememberUpdatedState(newValue = { handleBack() })
 	val currentKeyHandler = rememberUpdatedState(newValue = { keyCode: Int -> handleKey(keyCode) })
+	val currentFocusReclaimHandler = rememberUpdatedState(newValue = { requestFocusForSelection(selection) })
 
 	SideEffect {
 		onBackPressedHandlerChange { currentBackHandler.value() }
 		onKeyPressedHandlerChange { keyCode -> currentKeyHandler.value(keyCode) }
+		onFocusReclaimHandlerChange { currentFocusReclaimHandler.value() }
 	}
 
 	LaunchedEffect(Unit) {
@@ -880,7 +899,6 @@ internal fun SearchScreen(
 
 	LaunchedEffect(selection) {
 		if (!inputEditing) requestFocusForSelection(selection)
-		selectionDescription(selection)?.let(view::announceForAccessibility)
 	}
 
 	LaunchedEffect(inputEditing) {
@@ -951,7 +969,11 @@ internal fun SearchScreen(
 				.focusRequester(contentFocusRequester)
 				.onPreviewKeyEvent(::handleComposeKey)
 				.onKeyEvent(::handleComposeKey)
-				.focusTarget(),
+				.searchSemanticFocusOwner(
+					description = selectionDescription(selection) ?: stringResource(R.string.lbl_search),
+					actionLabel = stringResource(R.string.search_action_activate),
+					onActivate = ::activateFocusedControl,
+				),
 		) {
 			LazyColumn(
 				state = listState,
