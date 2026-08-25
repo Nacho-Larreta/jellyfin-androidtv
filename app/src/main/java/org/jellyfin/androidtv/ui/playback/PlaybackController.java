@@ -113,6 +113,7 @@ public class PlaybackController implements PlaybackControllerNotifiable {
     private long mSeekPosition = -1;
     private boolean wasSeeking = false;
     private boolean finishedInitialSeek = false;
+    private final SeekPlaybackCoordinator seekPlaybackCoordinator = new SeekPlaybackCoordinator();
 
     private LocalDateTime mCurrentProgramEnd = null;
     private LocalDateTime mCurrentProgramStart = null;
@@ -918,6 +919,7 @@ public class PlaybackController implements PlaybackControllerNotifiable {
         mSeekPosition = -1;
         finishedInitialSeek = false;
         wasSeeking = false;
+        seekPlaybackCoordinator.abort();
         burningSubs = false;
         mCurrentStreamInfo = null;
     }
@@ -972,12 +974,8 @@ public class PlaybackController implements PlaybackControllerNotifiable {
             return;
         }
 
-        if (wasSeeking) {
-            Timber.d("Previous seek has not finished - cancelling seek from %s to %d", mCurrentPosition, pos);
-            if (isPaused()) {
-                refreshCurrentPosition();
-                play(mCurrentPosition);
-            }
+        if (wasSeeking || !seekPlaybackCoordinator.begin(mPlaybackState)) {
+            Timber.d("Previous seek has not finished - ignoring seek from %s to %d", mCurrentPosition, pos);
             return;
         }
         wasSeeking = true;
@@ -990,6 +988,7 @@ public class PlaybackController implements PlaybackControllerNotifiable {
             currentSkipPos = mCurrentPosition;
             mSeekPosition = mCurrentPosition;
             // Finalize item playback
+            seekPlaybackCoordinator.abort();
             itemComplete();
             return;
         }
@@ -999,7 +998,10 @@ public class PlaybackController implements PlaybackControllerNotifiable {
         // set seekPosition so real position isn't used until playback starts again
         mSeekPosition = pos;
 
-        if (mCurrentStreamInfo == null) return;
+        if (mCurrentStreamInfo == null) {
+            applySeekTransition(seekPlaybackCoordinator.directSeekCompleted());
+            return;
+        }
 
         // rebuild the stream
         // if an older device uses exoplayer to play a transcoded stream but falls back to the generic http stream instead of hls, rebuild the stream
@@ -1012,14 +1014,14 @@ public class PlaybackController implements PlaybackControllerNotifiable {
             playbackManager.getValue().changeVideoStream(mFragment, mCurrentStreamInfo, mCurrentOptions, pos * 10000, new Response<StreamInfo>(mFragment.getLifecycle()) {
                 @Override
                 public void onResponse(StreamInfo response) {
-                    if (!isActive()) return;
+                    if (!isActive() || !seekPlaybackCoordinator.isActive()) return;
                     mCurrentStreamInfo = response;
 
                     updateBurningSubs(response);
 
                     if (mVideoManager != null) {
+                        applySeekTransition(seekPlaybackCoordinator.streamRestarting());
                         mVideoManager.setMediaStreamInfo(api.getValue(), response);
-                        mVideoManager.start();
                     }
                 }
 
@@ -1030,27 +1032,65 @@ public class PlaybackController implements PlaybackControllerNotifiable {
                         Utils.showToast(mFragment.getContext(), R.string.msg_video_playback_error);
                     Timber.e(exception, "Error trying to seek transcoded stream");
                     // call stop so playback can be retried by the user
+                    abandonSeekTransaction();
                     stop();
                 }
             });
         } else {
-            // use the same approach to directplay seeking as setOnProgressListener
-            // set state to SEEKING
-            // if seek succeeds call play and mirror the logic in play() for unpausing. if fails call pause()
-            // stopProgressLoop() being called at the beginning of startProgressLoop keeps this from breaking. otherwise it would start twice
-            // if seek() is called from skip()
             mPlaybackState = PlaybackState.SEEKING;
             if (mVideoManager.seekTo(pos) < 0) {
                 if (mFragment != null)
                     Utils.showToast(mFragment.getContext(), mFragment.getString(R.string.seek_error));
-                pause();
-            } else {
-                mVideoManager.play();
-                mPlaybackState = PlaybackState.PLAYING;
-                if (mFragment != null) mFragment.setFadingEnabled(true);
-                startReportLoop();
             }
+            applySeekTransition(seekPlaybackCoordinator.directSeekCompleted());
         }
+    }
+
+    private void applySeekTransition(SeekPlaybackCoordinator.Transition transition) {
+        mPlaybackState = transition.controllerState;
+        applySeekCompletionEffects(transition.completionEffects);
+        applySeekOverlayIntent(transition.overlayIntent);
+
+        if (transition.engineIntent == SeekPlaybackCoordinator.EngineIntent.START) mVideoManager.start();
+        else if (transition.engineIntent == SeekPlaybackCoordinator.EngineIntent.PAUSE) mVideoManager.pause();
+
+        if (transition.reportLoop == SeekPlaybackCoordinator.ReportLoop.NONE) {
+            return;
+        }
+
+        wasSeeking = mPlaybackState == PlaybackState.PLAYING && !finishedInitialSeek;
+        if (mFragment != null) {
+            mFragment.setFadingEnabled(mPlaybackState == PlaybackState.PLAYING);
+            mFragment.setPlayPauseActionState(0);
+        }
+
+        applySeekReportLoop(transition.reportLoop);
+    }
+
+    private void applySeekCompletionEffects(SeekPlaybackCoordinator.CompletionEffects completionEffects) {
+        if (completionEffects == SeekPlaybackCoordinator.CompletionEffects.NONE) return;
+
+        configurePreparedMediaTracks();
+        interactionTracker.notifyStart(getCurrentlyPlayingItem());
+        mCurrentTranscodeStartTime = mCurrentStreamInfo.getPlayMethod() == PlayMethod.TRANSCODE
+                ? Instant.now().toEpochMilli()
+                : 0;
+    }
+
+    private void applySeekOverlayIntent(SeekPlaybackCoordinator.OverlayIntent overlayIntent) {
+        if (overlayIntent == SeekPlaybackCoordinator.OverlayIntent.HIDE && mFragment != null) {
+            mFragment.leanbackOverlayFragment.setShouldShowOverlay(false);
+        }
+    }
+
+    private void applySeekReportLoop(SeekPlaybackCoordinator.ReportLoop reportLoop) {
+        if (reportLoop == SeekPlaybackCoordinator.ReportLoop.PLAYING) startReportLoop();
+        else if (reportLoop == SeekPlaybackCoordinator.ReportLoop.PAUSED) startPauseReportLoop();
+    }
+
+    private void abandonSeekTransaction() {
+        seekPlaybackCoordinator.abort();
+        wasSeeking = false;
     }
 
     private long currentSkipPos = 0;
@@ -1222,7 +1262,20 @@ public class PlaybackController implements PlaybackControllerNotifiable {
     }
 
     @Override
+    public void onMediaReady() {
+        SeekPlaybackCoordinator.Transition transition = seekPlaybackCoordinator.mediaReady();
+        if (transition != null) applySeekTransition(transition);
+    }
+
+    @Override
     public void onPrepared() {
+        SeekPlaybackCoordinator.Transition seekCompletion = seekPlaybackCoordinator.playbackStarted();
+        if (seekCompletion != null) {
+            Timber.i("Play method: %s", mCurrentStreamInfo.getPlayMethod() == PlayMethod.TRANSCODE ? "Trans" : "Direct");
+            applySeekTransition(seekCompletion);
+            return;
+        }
+
         if (mPlaybackState == PlaybackState.BUFFERING) {
             if (mFragment != null) {
                 mFragment.setFadingEnabled(true);
@@ -1240,27 +1293,26 @@ public class PlaybackController implements PlaybackControllerNotifiable {
         if (mPlaybackState == PlaybackState.PAUSED) {
             mPlaybackState = PlaybackState.PLAYING;
         } else {
-            if (!burningSubs) {
-                // Make sure the requested subtitles are enabled when external/embedded
-                Integer currentSubtitleIndex = mCurrentOptions.getSubtitleStreamIndex();
-                if (currentSubtitleIndex == null) currentSubtitleIndex = -1;
-                PlaybackControllerHelperKt.setSubtitleIndex(this, currentSubtitleIndex, true);
-            } else {
-                PlaybackControllerHelperKt.disableDefaultSubtitles(this);
-            }
-
-            // select an audio track
-            int eligibleAudioTrack = mDefaultAudioIndex;
-
-            // if track switching is done without rebuilding the stream, mCurrentOptions is updated
-            // otherwise, use the server default
-            if (mCurrentOptions.getAudioStreamIndex() != null) {
-                eligibleAudioTrack = mCurrentOptions.getAudioStreamIndex();
-            } else if (getCurrentMediaSource().getDefaultAudioStreamIndex() != null) {
-                eligibleAudioTrack = getCurrentMediaSource().getDefaultAudioStreamIndex();
-            }
-            switchAudioStream(eligibleAudioTrack);
+            configurePreparedMediaTracks();
         }
+    }
+
+    private void configurePreparedMediaTracks() {
+        if (!burningSubs) {
+            Integer currentSubtitleIndex = mCurrentOptions.getSubtitleStreamIndex();
+            if (currentSubtitleIndex == null) currentSubtitleIndex = -1;
+            PlaybackControllerHelperKt.setSubtitleIndex(this, currentSubtitleIndex, true);
+        } else {
+            PlaybackControllerHelperKt.disableDefaultSubtitles(this);
+        }
+
+        int eligibleAudioTrack = mDefaultAudioIndex;
+        if (mCurrentOptions.getAudioStreamIndex() != null) {
+            eligibleAudioTrack = mCurrentOptions.getAudioStreamIndex();
+        } else if (getCurrentMediaSource().getDefaultAudioStreamIndex() != null) {
+            eligibleAudioTrack = getCurrentMediaSource().getDefaultAudioStreamIndex();
+        }
+        switchAudioStream(eligibleAudioTrack);
     }
 
     @Override
@@ -1358,5 +1410,146 @@ public class PlaybackController implements PlaybackControllerNotifiable {
         SEEKING,
         UNDEFINED,
         ERROR
+    }
+}
+
+final class SeekPlaybackCoordinator {
+    enum EngineIntent {
+        NONE,
+        START,
+        PAUSE
+    }
+
+    enum ReportLoop {
+        NONE,
+        PLAYING,
+        PAUSED
+    }
+
+    enum CompletionEffects {
+        NONE,
+        PREPARED_MEDIA
+    }
+
+    enum OverlayIntent {
+        NONE,
+        HIDE
+    }
+
+    enum Transition {
+        DIRECT_PAUSED(PlaybackController.PlaybackState.PAUSED, EngineIntent.NONE, ReportLoop.PAUSED, CompletionEffects.NONE, OverlayIntent.NONE),
+        DIRECT_PLAYING(PlaybackController.PlaybackState.PLAYING, EngineIntent.NONE, ReportLoop.PLAYING, CompletionEffects.NONE, OverlayIntent.NONE),
+        RESTART_PAUSED(PlaybackController.PlaybackState.BUFFERING, EngineIntent.PAUSE, ReportLoop.NONE, CompletionEffects.NONE, OverlayIntent.NONE),
+        RESTART_PLAYING(PlaybackController.PlaybackState.BUFFERING, EngineIntent.START, ReportLoop.NONE, CompletionEffects.NONE, OverlayIntent.NONE),
+        MEDIA_READY_PAUSED(PlaybackController.PlaybackState.PAUSED, EngineIntent.NONE, ReportLoop.PAUSED, CompletionEffects.PREPARED_MEDIA, OverlayIntent.NONE),
+        PLAYBACK_STARTED_PLAYING(PlaybackController.PlaybackState.PLAYING, EngineIntent.NONE, ReportLoop.PLAYING, CompletionEffects.PREPARED_MEDIA, OverlayIntent.HIDE);
+
+        final PlaybackController.PlaybackState controllerState;
+        final EngineIntent engineIntent;
+        final ReportLoop reportLoop;
+        final CompletionEffects completionEffects;
+        final OverlayIntent overlayIntent;
+
+        Transition(
+                PlaybackController.PlaybackState controllerState,
+                EngineIntent engineIntent,
+                ReportLoop reportLoop,
+                CompletionEffects completionEffects,
+                OverlayIntent overlayIntent
+        ) {
+            this.controllerState = controllerState;
+            this.engineIntent = engineIntent;
+            this.reportLoop = reportLoop;
+            this.completionEffects = completionEffects;
+            this.overlayIntent = overlayIntent;
+        }
+    }
+
+    private enum Phase {
+        INACTIVE,
+        SEEKING,
+        AWAITING_PAUSED_MEDIA_READY,
+        AWAITING_PLAYING_START
+    }
+
+    private PlaybackController.PlaybackState playbackState;
+    private Phase phase = Phase.INACTIVE;
+
+    boolean begin(PlaybackController.PlaybackState currentPlaybackState) {
+        if (isActive() || !isSeekablePlaybackState(currentPlaybackState)) {
+            return false;
+        }
+
+        playbackState = currentPlaybackState;
+        phase = Phase.SEEKING;
+        return true;
+    }
+
+    Transition directSeekCompleted() {
+        requirePhase(Phase.SEEKING);
+        return complete(requirePlaybackState() == PlaybackController.PlaybackState.PAUSED
+                ? Transition.DIRECT_PAUSED
+                : Transition.DIRECT_PLAYING);
+    }
+
+    Transition streamRestarting() {
+        requirePhase(Phase.SEEKING);
+        if (requirePlaybackState() == PlaybackController.PlaybackState.PAUSED) {
+            phase = Phase.AWAITING_PAUSED_MEDIA_READY;
+            return Transition.RESTART_PAUSED;
+        }
+
+        phase = Phase.AWAITING_PLAYING_START;
+        return Transition.RESTART_PLAYING;
+    }
+
+    Transition mediaReady() {
+        if (phase != Phase.AWAITING_PAUSED_MEDIA_READY) return null;
+        return complete(Transition.MEDIA_READY_PAUSED);
+    }
+
+    Transition playbackStarted() {
+        if (phase != Phase.AWAITING_PLAYING_START) return null;
+        return complete(Transition.PLAYBACK_STARTED_PLAYING);
+    }
+
+    boolean isActive() {
+        return phase != Phase.INACTIVE;
+    }
+
+    boolean isAwaitingPausedMediaReady() {
+        return phase == Phase.AWAITING_PAUSED_MEDIA_READY;
+    }
+
+    boolean isAwaitingPlayingStart() {
+        return phase == Phase.AWAITING_PLAYING_START;
+    }
+
+    void abort() {
+        playbackState = null;
+        phase = Phase.INACTIVE;
+    }
+
+    private Transition complete(Transition transition) {
+        abort();
+        return transition;
+    }
+
+    private PlaybackController.PlaybackState requirePlaybackState() {
+        if (playbackState == null) {
+            throw new IllegalStateException("A seek transaction is not active");
+        }
+        return playbackState;
+    }
+
+    private void requirePhase(Phase expectedPhase) {
+        if (phase != expectedPhase) {
+            throw new IllegalStateException("Unexpected seek phase: " + phase);
+        }
+    }
+
+    private boolean isSeekablePlaybackState(PlaybackController.PlaybackState state) {
+        return state == PlaybackController.PlaybackState.PLAYING
+                || state == PlaybackController.PlaybackState.PAUSED;
     }
 }

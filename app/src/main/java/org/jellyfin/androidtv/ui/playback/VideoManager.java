@@ -81,6 +81,7 @@ public class VideoManager {
     public ExoPlayer mExoPlayer;
     private PlayerView mExoPlayerView;
     private Handler mHandler = new Handler();
+    private final MediaReadyOneShotGate mediaReadyOneShotGate = new MediaReadyOneShotGate();
 
     private long mMetaDuration = -1;
     private long lastExoPlayerPosition = -1;
@@ -160,6 +161,10 @@ public class VideoManager {
             public void onPlaybackStateChanged(int playbackState) {
                 if (playbackState == Player.STATE_BUFFERING) {
                     Timber.d("Player is buffering");
+                }
+
+                if (playbackState == Player.STATE_READY && mediaReadyOneShotGate.claimReady()) {
+                    if (mPlaybackControllerNotifiable != null) mPlaybackControllerNotifiable.onMediaReady();
                 }
 
                 if (playbackState == Player.STATE_ENDED) {
@@ -402,6 +407,7 @@ public class VideoManager {
                     .setSubtitleConfigurations(subtitleConfigurations)
                     .build();
 
+            mediaReadyOneShotGate.beginGeneration();
             mExoPlayer.setMediaItem(mediaItem);
             mExoPlayer.prepare();
         } catch (IllegalStateException e) {
@@ -655,5 +661,19 @@ public class VideoManager {
         if (progressLoop != null) {
             mHandler.removeCallbacks(progressLoop);
         }
+    }
+}
+
+final class MediaReadyOneShotGate {
+    private boolean readyClaimed = true;
+
+    void beginGeneration() {
+        readyClaimed = false;
+    }
+
+    boolean claimReady() {
+        if (readyClaimed) return false;
+        readyClaimed = true;
+        return true;
     }
 }
