@@ -360,7 +360,9 @@
     <string name="profile_selector_pin_badge">PIN</string>
     <string name="profile_selector_pin_title">Enter PIN for %1$s</string>
     <string name="profile_selector_pin_message">This profile requires a PIN before continuing.</string>
-    <string name="profile_selector_pin_hint">4-6 digits</string>
+    <string name="profile_selector_pin_hint">4-8 digits</string>
+    <string name="profile_selector_pin_description">Profile PIN, 4 to 8 digits</string>
+    <string name="profile_selector_pin_format_invalid">Enter 4 to 8 ASCII digits.</string>
     <string name="profile_selector_pin_invalid">That PIN is not correct.</string>
     <string name="profile_selector_pin_locked">This profile is temporarily locked after too many failed PIN attempts.</string>
     <string name="profile_selector_profile_disabled">This profile is currently disabled.</string>

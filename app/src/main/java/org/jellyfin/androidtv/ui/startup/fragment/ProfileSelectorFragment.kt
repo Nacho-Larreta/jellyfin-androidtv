@@ -20,8 +20,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.auth.model.PROFILE_PIN_MAX_LENGTH
 import org.jellyfin.androidtv.auth.model.ProfileSelector
 import org.jellyfin.androidtv.auth.model.ProfileSelectorUser
+import org.jellyfin.androidtv.auth.model.isValidProfilePin
 import org.jellyfin.androidtv.auth.repository.ProfileSelectorApiException
 import org.jellyfin.androidtv.auth.repository.ProfileSelectorRepository
 import org.jellyfin.androidtv.auth.repository.ServerRepository
@@ -190,8 +192,9 @@ class ProfileSelectorFragment : Fragment() {
 
 	private fun showPinPrompt(profile: ProfileSelectorUser, errorMessage: String? = null) {
 		val pinInput = EditText(requireContext()).apply {
-			filters = arrayOf(InputFilter.LengthFilter(6))
+			filters = arrayOf(InputFilter.LengthFilter(PROFILE_PIN_MAX_LENGTH))
 			hint = getString(R.string.profile_selector_pin_hint)
+			contentDescription = getString(R.string.profile_selector_pin_description)
 			imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE
 			inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
 		}
@@ -200,17 +203,31 @@ class ProfileSelectorFragment : Fragment() {
 			.setTitle(getString(R.string.profile_selector_pin_title, profile.name))
 			.setMessage(errorMessage ?: getString(R.string.profile_selector_pin_message))
 			.setView(pinInput)
-			.setPositiveButton(R.string.lbl_ok) { _, _ ->
-				activateProfile(profile, pinInput.text?.toString().orEmpty())
-			}
-			.setNegativeButton(R.string.btn_cancel, null)
+			.setPositiveButton(R.string.lbl_ok, null)
+			.setNegativeButton(R.string.btn_cancel) { _, _ -> restoreProfileSelectorFocus() }
 			.create()
 
 		dialog.setOnShowListener {
+			dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+				val pin = pinInput.text?.toString()
+				if (!isValidProfilePin(pin)) {
+					pinInput.error = getString(R.string.profile_selector_pin_format_invalid)
+					pinInput.requestFocus()
+					return@setOnClickListener
+				}
+
+				dialog.dismiss()
+				activateProfile(profile, pin)
+			}
 			pinInput.requestFocus()
 			dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
 		}
+		dialog.setOnCancelListener { restoreProfileSelectorFocus() }
 		dialog.show()
+	}
+
+	private fun restoreProfileSelectorFocus() {
+		binding.users.requestFocus()
 	}
 
 	private fun activateProfile(profile: ProfileSelectorUser, pin: String?) {

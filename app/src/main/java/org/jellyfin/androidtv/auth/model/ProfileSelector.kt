@@ -66,7 +66,17 @@ data class ProfileSelectorProfileDto(
 @Serializable
 data class ProfileActivationRequest(
 	@SerialName("Pin") val pin: String? = null,
-)
+) {
+	fun hasValidPinFormat(): Boolean = pin == null || isValidProfilePin(pin)
+}
+
+internal fun isValidProfilePin(pin: String?): Boolean =
+	pin != null &&
+		pin.length in PROFILE_PIN_MIN_LENGTH..PROFILE_PIN_MAX_LENGTH &&
+		pin.all { character -> character in '0'..'9' }
+
+internal const val PROFILE_PIN_MIN_LENGTH = 4
+internal const val PROFILE_PIN_MAX_LENGTH = 8
 
 @Serializable
 data class ProfileActivationResultDto(

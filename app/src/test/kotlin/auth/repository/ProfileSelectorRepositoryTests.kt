@@ -1,12 +1,41 @@
 package org.jellyfin.androidtv.auth.repository
 
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
+import kotlinx.serialization.json.Json
+import org.jellyfin.androidtv.auth.model.isValidProfilePin
 import org.jellyfin.androidtv.auth.model.ProfileSelector
 import org.jellyfin.androidtv.auth.model.ProfileSelectorUser
 import java.util.UUID
 
 class ProfileSelectorRepositoryTests : FunSpec({
+	test("accepts only 4 to 8 ASCII digits as a profile PIN") {
+		listOf("0001", "1234", "12345678").forEach { pin ->
+			isValidProfilePin(pin) shouldBe true
+		}
+
+		listOf<String?>(null, "", "123", "123456789", "12a4", "12 4", "١٢٣٤", "12١4").forEach { pin ->
+			isValidProfilePin(pin) shouldBe false
+		}
+	}
+
+	test("serializes a valid PIN without dropping leading zeroes") {
+		encodeProfileActivationRequest("0001", Json { encodeDefaults = true }) shouldBe "{\"Pin\":\"0001\"}"
+	}
+
+	test("serializes an omitted PIN for profiles that do not require one") {
+		encodeProfileActivationRequest(null, Json { encodeDefaults = true }) shouldBe "{\"Pin\":null}"
+	}
+
+	test("rejects invalid PIN before a request body can be created") {
+		val exception = shouldThrow<ProfileSelectorApiException> {
+			encodeProfileActivationRequest("12 4")
+		}
+
+		exception.code shouldBe "PROFILE_PIN_INVALID_FORMAT"
+	}
+
 	test("returns remembered profile when it is eligible") {
 		val ownerId = UUID.randomUUID()
 		val rememberedProfile = profile(

@@ -131,7 +131,7 @@ class ProfileSelectorRepositoryImpl(
 	}
 
 	override suspend fun activateProfile(session: Session, profileUserId: UUID, pin: String?): Session {
-		val requestBody = json.encodeToString(ProfileActivationRequest(pin = pin))
+		val requestBody = encodeProfileActivationRequest(pin, json)
 		val response = executeRequest(
 			session = session,
 			method = "POST",
@@ -395,6 +395,19 @@ class ProfileSelectorRepositoryImpl(
 	private companion object {
 		val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 	}
+}
+
+internal fun encodeProfileActivationRequest(pin: String?, json: Json = Json): String {
+	val request = ProfileActivationRequest(pin = pin)
+	if (!request.hasValidPinFormat()) {
+		throw ProfileSelectorApiException(
+			statusCode = 400,
+			code = "PROFILE_PIN_INVALID_FORMAT",
+			message = "Profile PIN must contain 4 to 8 ASCII digits.",
+		)
+	}
+
+	return json.encodeToString(request)
 }
 
 internal fun resolveAutoProfileCandidate(
