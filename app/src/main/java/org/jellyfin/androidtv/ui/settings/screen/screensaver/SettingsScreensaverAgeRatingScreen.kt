@@ -1,18 +1,24 @@
 package org.jellyfin.androidtv.ui.settings.screen.screensaver
 
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.preference.UserPreferences
 import org.jellyfin.androidtv.ui.base.Text
 import org.jellyfin.androidtv.ui.base.form.RadioButton
-import org.jellyfin.androidtv.ui.base.list.ListButton
+import org.jellyfin.androidtv.ui.base.list.ListControl
 import org.jellyfin.androidtv.ui.base.list.ListSection
 import org.jellyfin.androidtv.ui.navigation.LocalRouter
-import org.jellyfin.androidtv.ui.settings.compat.rememberPreference
 import org.jellyfin.androidtv.ui.settings.composable.SettingsColumn
 import org.koin.compose.koinInject
 
@@ -20,10 +26,13 @@ import org.koin.compose.koinInject
 fun SettingsScreensaverAgeRatingScreen() {
 	val router = LocalRouter.current
 	val userPreferences = koinInject<UserPreferences>()
-	var screensaverAgeRatingMax by rememberPreference(userPreferences, UserPreferences.screensaverAgeRatingMax)
+	val selectedAgeRating = remember { userPreferences.readScreensaverAgeRatingMax() }
 	val options = getScreensaverAgeRatingOptions()
+	LaunchedEffect(Unit) {
+		userPreferences[UserPreferences.screensaverAgeRatingMax] = selectedAgeRating
+	}
 
-	SettingsColumn {
+	SettingsColumn(modifier = Modifier.selectableGroup()) {
 		item {
 			ListSection(
 				overlineContent = { Text(stringResource(R.string.pref_screensaver).uppercase()) },
@@ -32,14 +41,38 @@ fun SettingsScreensaverAgeRatingScreen() {
 		}
 
 		items(options) { (ageRating, heading) ->
-			ListButton(
-				headingContent = { Text(heading) },
-				trailingContent = { RadioButton(checked = screensaverAgeRatingMax == ageRating) },
+			ScreensaverAgeRatingOption(
+				heading = heading,
+				selected = selectedAgeRating == ageRating,
 				onClick = {
-					screensaverAgeRatingMax = ageRating
+					userPreferences[UserPreferences.screensaverAgeRatingMax] = ageRating
 					router.back()
 				}
 			)
 		}
 	}
+}
+
+@Composable
+private fun ScreensaverAgeRatingOption(
+	heading: String,
+	selected: Boolean,
+	onClick: () -> Unit,
+) {
+	val interactionSource = remember { MutableInteractionSource() }
+
+	ListControl(
+		headingContent = { Text(heading) },
+		trailingContent = { RadioButton(checked = selected) },
+		interactionSource = interactionSource,
+		modifier = Modifier
+			.selectable(
+				selected = selected,
+				interactionSource = interactionSource,
+				indication = null,
+				role = Role.RadioButton,
+				onClick = onClick,
+			)
+			.semantics { contentDescription = heading },
+	)
 }

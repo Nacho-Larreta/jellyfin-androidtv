@@ -5,6 +5,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.screensaver.ScreensaverContentPolicy
 import org.jellyfin.androidtv.util.getQuantityString
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
@@ -12,10 +13,14 @@ import kotlin.time.Duration.Companion.seconds
 @Composable
 @Stable
 fun getScreensaverAgeRatingOptions() = buildList {
-	add(0 to stringResource(R.string.pref_screensaver_ageratingmax_zero))
-	setOf(5, 10, 13, 14, 16, 18, 21)
-		.forEach { age -> add(age to stringResource(R.string.pref_screensaver_ageratingmax_entry, age)) }
-	add(-1 to stringResource(R.string.pref_screensaver_ageratingmax_unlimited))
+	ScreensaverContentPolicy.supportedAgeCeilings.forEach { age ->
+		val label = when (age) {
+			ScreensaverContentPolicy.DEFAULT_AGE_CEILING -> stringResource(R.string.pref_screensaver_ageratingmax_zero)
+			ScreensaverContentPolicy.UNLIMITED -> stringResource(R.string.pref_screensaver_ageratingmax_unlimited)
+			else -> stringResource(R.string.pref_screensaver_ageratingmax_entry, age)
+		}
+		add(age to label)
+	}
 }
 
 @Composable

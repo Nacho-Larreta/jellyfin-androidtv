@@ -54,21 +54,10 @@ fun SettingsScreensaverScreen() {
 		}
 
 		item {
-			var screensaverAgeRatingRequired by rememberPreference(userPreferences, UserPreferences.screensaverAgeRatingRequired)
-
-			ListButton(
-				headingContent = { Text(stringResource(R.string.pref_screensaver_ageratingrequired_title)) },
-				trailingContent = { Checkbox(checked = screensaverAgeRatingRequired) },
-				captionContent = { Text(stringResource(R.string.pref_screensaver_ageratingrequired_enabled)) },
-				onClick = { screensaverAgeRatingRequired = !screensaverAgeRatingRequired }
-			)
-		}
-
-		item {
-			var screensaverAgeRatingMax by rememberPreference(userPreferences, UserPreferences.screensaverAgeRatingMax)
+			val resolvedAgeRatingMax = userPreferences.readScreensaverAgeRatingMax()
 			val caption = getScreensaverAgeRatingOptions()
-				.firstOrNull { (ageRating) -> ageRating == screensaverAgeRatingMax }
-				?.second.orEmpty()
+				.first { (ageRating) -> ageRating == resolvedAgeRatingMax }
+				.second
 
 			ListButton(
 				headingContent = { Text(stringResource(R.string.pref_screensaver_ageratingmax)) },

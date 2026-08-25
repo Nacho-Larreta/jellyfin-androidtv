@@ -9,8 +9,11 @@ import androidx.compose.ui.Modifier
 import org.jellyfin.design.Tokens
 
 @Composable
-fun SettingsColumn(content: LazyListScope.() -> Unit) = LazyColumn(
-	modifier = Modifier
+fun SettingsColumn(
+	modifier: Modifier = Modifier,
+	content: LazyListScope.() -> Unit,
+) = LazyColumn(
+	modifier = modifier
 		.padding(Tokens.Space.spaceSm),
 	verticalArrangement = Arrangement.spacedBy(Tokens.Space.spaceXs),
 	content = content,
