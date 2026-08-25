@@ -47,6 +47,7 @@ import org.jellyfin.androidtv.ui.search.SearchRepository
 import org.jellyfin.androidtv.ui.search.SearchRepositoryImpl
 import org.jellyfin.androidtv.ui.search.SearchViewModel
 import org.jellyfin.androidtv.ui.settings.compat.SettingsViewModel
+import org.jellyfin.androidtv.ui.startup.NoSessionStartupRouter
 import org.jellyfin.androidtv.ui.startup.ServerAddViewModel
 import org.jellyfin.androidtv.ui.startup.StartupViewModel
 import org.jellyfin.androidtv.ui.startup.UserLoginViewModel
@@ -66,6 +67,7 @@ import org.koin.android.ext.koin.androidContext
 import org.koin.core.module.dsl.viewModel
 import org.koin.core.qualifier.named
 import org.koin.dsl.module
+import java.util.UUID
 import org.jellyfin.sdk.Jellyfin as JellyfinSdk
 
 val defaultDeviceInfo = named("defaultDeviceInfo")
@@ -146,6 +148,7 @@ val appModule = module {
 	single<ExternalAppRepository> { ExternalAppRepository(get()) }
 
 	viewModel { StartupViewModel(get(), get(), get(), get()) }
+	factory { (lastServerId: suspend () -> UUID?) -> NoSessionStartupRouter(lastServerId) }
 	viewModel { UserLoginViewModel(get(), get(), get(), get(defaultDeviceInfo)) }
 	viewModel { ServerAddViewModel(get()) }
 	viewModel { HomeHeroViewModel(get(), get()) }

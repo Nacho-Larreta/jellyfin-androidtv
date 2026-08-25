@@ -6,6 +6,8 @@ plugins {
 }
 
 android {
+	val robolectricHomeDirectory = rootProject.layout.buildDirectory.dir("robolectric-home")
+
 	namespace = "org.jellyfin.androidtv"
 	compileSdk = libs.versions.android.compileSdk.get().toInt()
 
@@ -91,8 +93,24 @@ android {
 		checkDependencies = true
 	}
 
-	testOptions.unitTests.all {
-		it.useJUnitPlatform()
+	testOptions.unitTests.apply {
+		isIncludeAndroidResources = true
+		all {
+			it.useJUnitPlatform()
+			it.systemProperty("user.home", robolectricHomeDirectory.get().asFile.absolutePath)
+			it.doFirst { robolectricHomeDirectory.get().asFile.mkdirs() }
+			it.jvmArgs(
+				"--add-opens=java.base/java.lang=ALL-UNNAMED",
+				"--add-opens=java.base/java.util=ALL-UNNAMED",
+				"--add-opens=java.base/java.io=ALL-UNNAMED",
+				"--add-opens=java.base/java.net=ALL-UNNAMED",
+				"--add-opens=java.base/java.security=ALL-UNNAMED",
+				"--add-opens=java.base/java.text=ALL-UNNAMED",
+				"--add-opens=java.base/jdk.internal.access=ALL-UNNAMED",
+				"--add-opens=java.desktop/java.awt.font=ALL-UNNAMED",
+				"--add-opens=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED",
+			)
+		}
 	}
 }
 
@@ -184,7 +202,10 @@ dependencies {
 	coreLibraryDesugaring(libs.android.desugar)
 
 	// Testing
+	testImplementation(libs.junit4)
 	testImplementation(libs.kotest.runner.junit5)
 	testImplementation(libs.kotest.assertions)
 	testImplementation(libs.mockk)
+	testImplementation(libs.robolectric)
+	testRuntimeOnly(libs.junit5.vintage.engine)
 }

@@ -36,7 +36,6 @@ import org.jellyfin.androidtv.ui.browsing.MainActivity
 import org.jellyfin.androidtv.ui.itemhandling.ItemLauncher
 import org.jellyfin.androidtv.ui.navigation.Destinations
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository
-import org.jellyfin.androidtv.ui.playback.MediaManager
 import org.jellyfin.androidtv.ui.startup.fragment.SelectServerFragment
 import org.jellyfin.androidtv.ui.startup.fragment.ProfileSelectorFragment
 import org.jellyfin.androidtv.ui.startup.fragment.ServerFragment
@@ -48,6 +47,7 @@ import org.jellyfin.sdk.api.client.extensions.userLibraryApi
 import org.jellyfin.sdk.model.serializer.toUUIDOrNull
 import org.koin.android.ext.android.inject
 import org.koin.androidx.viewmodel.ext.android.viewModel
+import org.koin.core.parameter.parametersOf
 import timber.log.Timber
 import java.util.UUID
 
@@ -60,8 +60,10 @@ class StartupActivity : FragmentActivity(), ProfileSelectorFragment.Host {
 	}
 
 	private val startupViewModel: StartupViewModel by viewModel()
+	private val noSessionStartupRouter: NoSessionStartupRouter by inject {
+		parametersOf(::getLastServerId)
+	}
 	private val api: ApiClient by inject()
-	private val mediaManager: MediaManager by inject()
 	private val profileSelectorRepository: ProfileSelectorRepository by inject()
 	private val sessionRepository: SessionRepository by inject()
 	private val userRepository: UserRepository by inject()
@@ -169,14 +171,14 @@ class StartupActivity : FragmentActivity(), ProfileSelectorFragment.Host {
 					}
 				}
 			} else {
-				// Clear audio queue in case left over from last run
-				mediaManager.clearAudioQueue()
-
-				val server = startupViewModel.getLastServer()
-				if (server != null) showServer(server.id)
-				else showServerSelection()
+				when (val destination = noSessionStartupRouter.route()) {
+					is NoSessionStartupDestination.Server -> showServer(destination.id)
+					NoSessionStartupDestination.ServerSelection -> showServerSelection()
+				}
 			}
 		}.launchIn(lifecycleScope)
+
+	private suspend fun getLastServerId() = startupViewModel.getLastServer()?.id
 
 	private suspend fun openNextActivity() {
 		val itemId = when {

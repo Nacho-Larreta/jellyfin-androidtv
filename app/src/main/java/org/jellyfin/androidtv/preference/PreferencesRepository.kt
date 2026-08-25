@@ -26,11 +26,21 @@ class PreferencesRepository(
 	}
 
 	suspend fun onSessionChanged() {
+		invalidateCachedPreferences()
+
+		if (api.baseUrl == null || api.accessToken.isNullOrBlank()) {
+			return
+		}
+
 		// Note: Do not run parallel as the server can't deal with that
 		// Relevant server issue: https://github.com/jellyfin/jellyfin/issues/5261
 		liveTvPreferences.update()
 		userSettingPreferences.update()
+	}
 
+	private fun invalidateCachedPreferences() {
+		liveTvPreferences.clearCache()
+		userSettingPreferences.clearCache()
 		libraryPreferences.clear()
 	}
 }

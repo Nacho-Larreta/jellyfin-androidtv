@@ -30,6 +30,8 @@ detekt = "1.23.8"
 java-jdk = "21"
 jellyfin-androidx-media = "1.9.0+1"
 jellyfin-sdk = "1.8.8"
+junit4 = "4.13.2"
+junit5 = "5.13.4"
 koin = "4.2.1"
 koin-compose = "4.2.1"
 kotest = "6.1.11"
@@ -39,6 +41,7 @@ kotlinx-serialization = "1.11.0"
 libass-android = "0.4.0"
 markwon = "4.6.2"
 mockk = "1.14.9"
+robolectric = "4.16.1"
 slf4j-timber = "0.0.4"
 timber = "5.0.1"
 
@@ -130,9 +133,12 @@ timber = { module = "com.jakewharton.timber:timber", version.ref = "timber" }
 android-desugar = { module = "com.android.tools:desugar_jdk_libs", version.ref = "android-desugar" }
 
 # Test utilities
+junit4 = { module = "junit:junit", version.ref = "junit4" }
+junit5-vintage-engine = { module = "org.junit.vintage:junit-vintage-engine", version.ref = "junit5" }
 kotest-runner-junit5 = { module = "io.kotest:kotest-runner-junit5", version.ref = "kotest" }
 kotest-assertions = { module = "io.kotest:kotest-assertions-core", version.ref = "kotest" }
 mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
+robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
 
 [bundles]
 acra = [

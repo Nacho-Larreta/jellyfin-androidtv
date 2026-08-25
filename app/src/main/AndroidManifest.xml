@@ -104,6 +104,7 @@
             android:exported="true"
             android:launchMode="singleTask"
             android:noHistory="true"
+            android:theme="@style/Theme.Jellyfin.Startup"
             android:windowSoftInputMode="adjustNothing">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
