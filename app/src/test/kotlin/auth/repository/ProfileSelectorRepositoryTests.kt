@@ -3,10 +3,16 @@ package org.jellyfin.androidtv.auth.repository
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
+import io.mockk.every
+import io.mockk.mockk
 import kotlinx.serialization.json.Json
 import org.jellyfin.androidtv.auth.model.isValidProfilePin
 import org.jellyfin.androidtv.auth.model.ProfileSelector
 import org.jellyfin.androidtv.auth.model.ProfileSelectorUser
+import org.jellyfin.androidtv.auth.store.AuthenticationStore
+import org.jellyfin.sdk.api.client.ApiClient
+import org.jellyfin.sdk.api.client.HttpClientOptions
+import org.jellyfin.sdk.api.okhttp.OkHttpFactory
 import java.util.UUID
 
 class ProfileSelectorRepositoryTests : FunSpec({
@@ -97,6 +103,28 @@ class ProfileSelectorRepositoryTests : FunSpec({
 		)
 
 		resolveAutoProfileCandidate(selector, rememberedProfileUserId = null) shouldBe null
+	}
+
+	test("sign out exposes a failed durable invalidation") {
+		val serverId = UUID.randomUUID()
+		val ownerUserId = UUID.randomUUID()
+		val store = mockk<AuthenticationStore> {
+			every { invalidateProfileSelector(serverId, ownerUserId) } returns false
+		}
+		val repository = ProfileSelectorRepositoryImpl(
+			apiClient = mockk<ApiClient>(),
+			authenticationStore = store,
+			okHttpFactory = mockk<OkHttpFactory>(),
+			httpClientOptions = mockk<HttpClientOptions>(),
+		)
+
+		repository.signOut(
+			Session(
+				userId = ownerUserId,
+				serverId = serverId,
+				accessToken = "owner-token",
+			)
+		) shouldBe false
 	}
 })
 

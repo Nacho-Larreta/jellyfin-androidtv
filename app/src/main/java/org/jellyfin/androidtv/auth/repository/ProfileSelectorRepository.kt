@@ -49,7 +49,7 @@ interface ProfileSelectorRepository {
 	suspend fun resolveStartupAction(session: Session, forceSelector: Boolean = false): ProfileSelectorStartupAction
 	suspend fun getCurrentSelector(session: Session): ProfileSelector?
 	suspend fun activateProfile(session: Session, profileUserId: UUID, pin: String? = null): Session
-	fun signOut(session: Session)
+	fun signOut(session: Session): Boolean
 }
 
 class ProfileSelectorRepositoryImpl(
@@ -168,21 +168,9 @@ class ProfileSelectorRepositoryImpl(
 		}
 	}
 
-	override fun signOut(session: Session) {
-		val ownerUserId = resolveOwnerUserId(session) ?: return
-		val users = authenticationStore.getUsers(session.serverId).orEmpty()
-
-		for ((userId, userInfo) in users) {
-			if (userId != ownerUserId && userInfo.profileSelectorOwnerUserId != ownerUserId) {
-				continue
-			}
-
-			authenticationStore.putUser(
-				session.serverId,
-				userId,
-				userInfo.copy(accessToken = null)
-			)
-		}
+	override fun signOut(session: Session): Boolean {
+		val ownerUserId = resolveOwnerUserId(session) ?: return false
+		return authenticationStore.invalidateProfileSelector(session.serverId, ownerUserId)
 	}
 
 	private suspend fun executeRequest(
@@ -255,28 +243,18 @@ class ProfileSelectorRepositoryImpl(
 
 	private fun cacheSelectorState(serverId: UUID, currentUserId: UUID, selector: ProfileSelector) {
 		val activeProfileUserId = selector.currentDeviceProfileUserId
-		val owner = authenticationStore.getUser(serverId, selector.ownerUserId)
-		if (owner != null) {
-			authenticationStore.putUser(
-				serverId,
-				selector.ownerUserId,
-				owner.copy(
-					profileSelectorId = selector.id,
-					profileSelectorLastProfileUserId = activeProfileUserId,
-					profileSelectorOwnerUserId = selector.ownerUserId,
-				)
+		authenticationStore.updateUser(serverId, selector.ownerUserId) { owner ->
+			owner.copy(
+				profileSelectorId = selector.id,
+				profileSelectorLastProfileUserId = activeProfileUserId,
+				profileSelectorOwnerUserId = selector.ownerUserId,
 			)
 		}
 
-		val currentUser = authenticationStore.getUser(serverId, currentUserId)
-		if (currentUser != null) {
-			authenticationStore.putUser(
-				serverId,
-				currentUserId,
-				currentUser.copy(
-					profileSelectorId = selector.id,
-					profileSelectorOwnerUserId = selector.ownerUserId,
-				)
+		authenticationStore.updateUser(serverId, currentUserId) { currentUser ->
+			currentUser.copy(
+				profileSelectorId = selector.id,
+				profileSelectorOwnerUserId = selector.ownerUserId,
 			)
 		}
 	}
@@ -286,16 +264,13 @@ class ProfileSelectorRepositoryImpl(
 			return
 		}
 
-		val owner = authenticationStore.getUser(serverId, ownerUserId) ?: return
-		authenticationStore.putUser(
-			serverId,
-			ownerUserId,
+		authenticationStore.updateUser(serverId, ownerUserId) { owner ->
 			owner.copy(
 				profileSelectorId = null,
 				profileSelectorLastProfileUserId = null,
 				profileSelectorOwnerUserId = null,
 			)
-		)
+		}
 	}
 
 	private fun cacheActivation(serverId: UUID, result: ProfileActivationResultDto) {
@@ -308,29 +283,16 @@ class ProfileSelectorRepositoryImpl(
 		}
 		val rememberedProfileUserId = activeProfile.id.takeIf { it == result.ownerUserId }
 
-		authenticationStore.getUser(serverId, result.ownerUserId)?.let { owner ->
-			authenticationStore.putUser(
-				serverId,
-				result.ownerUserId,
-				owner.copy(
-					lastUsed = now,
-					profileSelectorId = result.profileSelectorId,
-					profileSelectorLastProfileUserId = activeProfile.id,
-					profileSelectorOwnerUserId = result.ownerUserId,
-				)
+		authenticationStore.updateUser(serverId, result.ownerUserId) { owner ->
+			owner.copy(
+				lastUsed = now,
+				profileSelectorId = result.profileSelectorId,
+				profileSelectorLastProfileUserId = activeProfile.id,
+				profileSelectorOwnerUserId = result.ownerUserId,
 			)
 		}
 
-		val existingProfileUser = authenticationStore.getUser(serverId, activeProfile.id)
-		val updatedProfileUser = existingProfileUser?.copy(
-			name = activeProfile.name ?: existingProfileUser.name,
-			lastUsed = now,
-			imageTag = activeProfile.primaryImageTag ?: existingProfileUser.imageTag,
-			accessToken = accessToken,
-			profileSelectorId = result.profileSelectorId,
-			profileSelectorLastProfileUserId = rememberedProfileUserId,
-			profileSelectorOwnerUserId = result.ownerUserId,
-		) ?: AuthenticationStoreUser(
+		val profileUser = AuthenticationStoreUser(
 			name = activeProfile.name ?: "Profile",
 			lastUsed = now,
 			imageTag = activeProfile.primaryImageTag,
@@ -339,8 +301,17 @@ class ProfileSelectorRepositoryImpl(
 			profileSelectorLastProfileUserId = rememberedProfileUserId,
 			profileSelectorOwnerUserId = result.ownerUserId,
 		)
-
-		authenticationStore.putUser(serverId, activeProfile.id, updatedProfileUser)
+		authenticationStore.updateUser(serverId, activeProfile.id, create = profileUser) { current ->
+			current.copy(
+				name = activeProfile.name ?: current.name,
+				lastUsed = now,
+				imageTag = activeProfile.primaryImageTag ?: current.imageTag,
+				accessToken = accessToken,
+				profileSelectorId = result.profileSelectorId,
+				profileSelectorLastProfileUserId = rememberedProfileUserId,
+				profileSelectorOwnerUserId = result.ownerUserId,
+			)
+		}
 	}
 
 	private fun resolveOwnerUserId(session: Session): UUID? =

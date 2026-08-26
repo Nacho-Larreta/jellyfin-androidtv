@@ -8,7 +8,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import org.jellyfin.androidtv.auth.model.AuthenticationActiveProfileSession
+import org.jellyfin.androidtv.auth.model.AuthenticationSessionEnvelope
 import org.jellyfin.androidtv.auth.model.Server
+import org.jellyfin.androidtv.auth.session.ActiveProfileCredential
+import org.jellyfin.androidtv.auth.session.SessionSnapshot
+import org.jellyfin.androidtv.auth.store.AuthenticationAuthoritySnapshot
 import org.jellyfin.androidtv.auth.store.AuthenticationPreferences
 import org.jellyfin.androidtv.auth.store.AuthenticationStore
 import org.jellyfin.androidtv.preference.PreferencesRepository
@@ -33,6 +38,8 @@ data class Session(
 	val accessToken: String,
 	val ownerUserId: UUID? = null,
 	val profileSelectorId: UUID? = null,
+	val sessionEpoch: Long = 0,
+	val deviceId: String? = null,
 )
 
 enum class SessionRepositoryState {
@@ -49,6 +56,7 @@ interface SessionRepository {
 	suspend fun restoreSession(destroyOnly: Boolean)
 	suspend fun switchCurrentSession(serverId: UUID, userId: UUID): Boolean
 	suspend fun switchCurrentSession(session: Session): Boolean
+	suspend fun installCommittedSession(snapshot: SessionSnapshot): Boolean
 	suspend fun prepareForProfileSelection()
 	suspend fun destroyCurrentSession()
 }
@@ -121,6 +129,20 @@ class SessionRepositoryImpl(
 		}
 	}
 
+	override suspend fun installCommittedSession(snapshot: SessionSnapshot): Boolean = withContext(NonCancellable) {
+		currentSessionMutex.withLock {
+			val authority = authenticationStore.getAuthoritySnapshot(snapshot.serverId)
+			val durable = authority?.envelope
+			if (durable?.matches(snapshot) != true) {
+				return@withLock false
+			}
+			_state.value = SessionRepositoryState.SWITCHING_SESSION
+			val installed = setCurrentSessionLocked(snapshot.toSession(), authority)
+			_state.value = if (installed) SessionRepositoryState.READY else SessionRepositoryState.INVALIDATING_SESSION
+			installed
+		}
+	}
+
 	override suspend fun prepareForProfileSelection(): Unit = withContext(NonCancellable) {
 		currentSessionMutex.withLock {
 			playbackQuiescePort.quiesceIfCreated()
@@ -142,30 +164,39 @@ class SessionRepositoryImpl(
 		_state.value = SessionRepositoryState.READY
 	}
 
-	private suspend fun setCurrentSessionLocked(session: Session?): Boolean {
+	private suspend fun setCurrentSessionLocked(
+		session: Session?,
+		committedAuthority: AuthenticationAuthoritySnapshot? = null,
+	): Boolean {
 		var server: Server? = null
+		val expectedAuthority = session?.let { committedAuthority ?: authenticationStore.getAuthoritySnapshot(it.serverId) }
 
 		if (session != null) {
-			// Update last active user
+			if (expectedAuthority == null) return false
 			authenticationPreferences[AuthenticationPreferences.lastServerId] = session.serverId.toString()
 			authenticationPreferences[AuthenticationPreferences.lastUserId] = session.userId.toString()
 			authenticationPreferences[AuthenticationPreferences.lastOwnerUserId] = session.ownerUserId?.toString().orEmpty()
 
-			// Check if server version is supported
 			server = serverRepository.getServer(session.serverId, true)
 			if (server == null || !server.versionSupported) return false
 		}
 
-		// Update session after binding the apiclient settings
-		val deviceInfo = session?.let { defaultDeviceInfo.forUser(it.userId) } ?: defaultDeviceInfo
+		val deviceInfo = session.resolveDeviceInfo(defaultDeviceInfo)
 		Timber.i("Updating current session. userId=${session?.userId} server=${server?.serverVersion}")
 
 		val previousApiBinding = captureApiClientBinding()
 		val applied = userApiClient.applySession(session, deviceInfo)
 		if (applied && session != null) {
+			val authority = checkNotNull(expectedAuthority)
 			try {
 				val user = withContext(Dispatchers.IO) {
 					userApiClient.userApi.getCurrentUser().content
+				}
+				if (user.id != session.userId) {
+					throw SessionIdentityMismatchException()
+				}
+				if (!persistActiveSession(session, authority, committedAuthority != null)) {
+					throw SessionPersistenceException()
 				}
 				userRepository.setCurrentUser(user)
 				serverRepository.setCurrentServer(server)
@@ -175,9 +206,18 @@ class SessionRepositoryImpl(
 				restoreApiClientBinding(previousApiBinding)
 				destroyCurrentSessionLocked()
 				return false
+			} catch (err: SessionPersistenceException) {
+				Timber.e(err, "Unable to durably install the authenticated session")
+				_state.value = SessionRepositoryState.INVALIDATING_SESSION
+				restoreApiClientBinding(previousApiBinding)
+				return false
+			} catch (err: SessionIdentityMismatchException) {
+				Timber.e(err, "Authenticated identity does not match the requested session")
+				_state.value = SessionRepositoryState.INVALIDATING_SESSION
+				restoreApiClientBinding(previousApiBinding)
+				return false
 			}
 
-			// Update crash reporting URL
 			val crashReportUrl = userApiClient.clientLogApi.logFileUrl()
 			telemetryPreferences[TelemetryPreferences.crashReportUrl] = crashReportUrl
 			telemetryPreferences[TelemetryPreferences.crashReportToken] = session.accessToken
@@ -224,12 +264,24 @@ class SessionRepositoryImpl(
 		val lastOwnerUserId = authenticationPreferences[AuthenticationPreferences.lastOwnerUserId].toUUIDOrNull()
 
 		return if (lastUserId != null && lastServerId != null) {
-			val restoreUserId = lastOwnerUserId ?: lastUserId
+			val durable = authenticationStore.getAuthoritySnapshot(lastServerId)?.envelope
+			val durableActive = durable?.activeProfile
+			if (durableActive != null && durableActive.profileUserId == lastUserId) {
+				return Session(
+					userId = durableActive.profileUserId,
+					serverId = lastServerId,
+					accessToken = durableActive.accessToken,
+					ownerUserId = durableActive.ownerUserId,
+					profileSelectorId = durableActive.profileSelectorId,
+					sessionEpoch = durable.sessionEpoch,
+					deviceId = durableActive.deviceId,
+				)
+			}
 			createUserSession(
 				serverId = lastServerId,
-				userId = restoreUserId,
+				userId = lastUserId,
 				ownerUserId = lastOwnerUserId,
-				profileSelectorId = authenticationStore.getUser(lastServerId, restoreUserId)?.profileSelectorId,
+				profileSelectorId = authenticationStore.getUser(lastServerId, lastUserId)?.profileSelectorId,
 			)
 		}
 		else null
@@ -273,7 +325,90 @@ class SessionRepositoryImpl(
 
 		return true
 	}
+
+	private fun persistActiveSession(
+		session: Session,
+		expectedAuthority: AuthenticationAuthoritySnapshot,
+		committed: Boolean,
+	): Boolean {
+		if (committed) {
+			val durableEnvelope = expectedAuthority.envelope ?: return false
+			return authenticationStore.replaceSessionEnvelope(
+				session.serverId,
+				expectedAuthority,
+				durableEnvelope,
+			) != null
+		}
+		val currentEnvelope = expectedAuthority.envelope
+		val nextEnvelope = AuthenticationSessionEnvelope(
+			activeProfile = AuthenticationActiveProfileSession(
+				profileUserId = session.userId,
+				accessToken = session.accessToken,
+				deviceId = session.deviceId ?: userApiClient.deviceInfo.id,
+				profileSelectorId = session.profileSelectorId,
+				ownerUserId = session.ownerUserId,
+			),
+			ownerRecovery = currentEnvelope?.ownerRecovery,
+			sessionEpoch = session.sessionEpoch,
+			pendingSwitch = currentEnvelope?.pendingSwitch,
+			cleanupMarker = currentEnvelope?.cleanupMarker,
+		)
+		return authenticationStore.replaceSessionEnvelope(
+			session.serverId,
+			expectedAuthority,
+			nextEnvelope,
+			requireActiveUserToken = true,
+		) != null
+	}
 }
+
+private fun Session?.resolveDeviceInfo(defaultDeviceInfo: DeviceInfo): DeviceInfo = when {
+	this == null -> defaultDeviceInfo
+	deviceId != null -> defaultDeviceInfo.copy(id = deviceId)
+	else -> defaultDeviceInfo.forUser(userId)
+}
+
+private fun AuthenticationSessionEnvelope.matches(snapshot: SessionSnapshot): Boolean {
+	if (cleanupMarker == null || sessionEpoch != snapshot.sessionEpoch) return false
+	val active = activeProfile ?: return false
+	return DurableActiveIdentity(
+		profileUserId = active.profileUserId,
+		deviceId = active.deviceId,
+		accessToken = active.accessToken,
+		profileSelectorId = active.profileSelectorId,
+		ownerUserId = active.ownerUserId,
+	) == DurableActiveIdentity(
+		profileUserId = snapshot.profileUserId,
+		deviceId = snapshot.deviceId,
+		accessToken = snapshot.credential.value,
+		profileSelectorId = snapshot.profileSelectorId,
+		ownerUserId = snapshot.ownerUserId,
+	)
+}
+
+private data class DurableActiveIdentity(
+	val profileUserId: UUID,
+	val deviceId: String,
+	val accessToken: String,
+	val profileSelectorId: UUID?,
+	val ownerUserId: UUID?,
+)
+
+private fun SessionSnapshot.toSession() = Session(
+	userId = profileUserId,
+	serverId = serverId,
+	accessToken = credential.token(),
+	ownerUserId = ownerUserId,
+	profileSelectorId = profileSelectorId,
+	sessionEpoch = sessionEpoch,
+	deviceId = deviceId,
+)
+
+private fun ActiveProfileCredential.token(): String = value
+
+private class SessionPersistenceException : IllegalStateException("Unable to persist active session.")
+
+private class SessionIdentityMismatchException : IllegalStateException("Authenticated identity mismatch.")
 
 private data class ApiClientBindingSnapshot(
 	val baseUrl: String?,

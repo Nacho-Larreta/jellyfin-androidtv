@@ -8,9 +8,22 @@ import io.kotest.matchers.shouldBe
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import org.jellyfin.androidtv.auth.model.AuthenticationActiveProfileSession
+import org.jellyfin.androidtv.auth.model.AuthenticationCommittedPendingCleanup
+import org.jellyfin.androidtv.auth.model.AuthenticationPendingSwitch
+import org.jellyfin.androidtv.auth.model.AuthenticationPendingSwitchPhase
+import org.jellyfin.androidtv.auth.model.AuthenticationSessionEnvelope
 import org.jellyfin.androidtv.auth.model.AuthenticationStoreServer
+import org.jellyfin.androidtv.auth.model.AuthenticationStoreUser
 import org.jellyfin.androidtv.auth.model.Server
+import org.jellyfin.androidtv.auth.session.ActiveProfileCredential
+import org.jellyfin.androidtv.auth.session.SessionSnapshot
+import org.jellyfin.androidtv.auth.store.AuthenticationAuthoritySnapshot
 import org.jellyfin.androidtv.auth.store.AuthenticationPreferences
 import org.jellyfin.androidtv.auth.store.AuthenticationStore
 import org.jellyfin.androidtv.preference.PreferencesRepository
@@ -228,6 +241,198 @@ class SessionRepositoryPlaybackTests : FunSpec({
 		fixture.serverState.value shouldBe null
 		repository.state.value shouldBe SessionRepositoryState.INVALIDATING_SESSION
 	}
+
+	test("last-user restore never substitutes the owner recovery identity") {
+		val events = mutableListOf<String>()
+		val fixture = SessionRepositoryFixture(events)
+		val ownerUserId = UUID.randomUUID()
+		val activeSession = fixture.session(accessToken = "active-profile-token").copy(
+			ownerUserId = ownerUserId,
+			profileSelectorId = UUID.randomUUID(),
+		)
+		fixture.configureLastUserRestore(activeSession, ownerUserId)
+		fixture.allowCurrentUserLookupFor(activeSession)
+		val repository = fixture.repository(RecordingPlaybackQuiescePort(events))
+
+		repository.restoreSession(destroyOnly = false)
+
+		repository.currentSession.value shouldBe activeSession
+		events.first() shouldBe "bind-api:active-profile-token"
+	}
+
+	test("committed install rejects a Users Me identity mismatch before publication") {
+		val events = mutableListOf<String>()
+		val fixture = SessionRepositoryFixture(events)
+		val candidate = fixture.session(accessToken = "committed-token")
+		fixture.mismatchCurrentUserLookupFor(candidate)
+		val repository = fixture.repository(RecordingPlaybackQuiescePort(events))
+
+		repository.switchCurrentSession(candidate).shouldBeFalse()
+
+		repository.currentSession.value shouldBe null
+		fixture.userState.value shouldBe fixture.authenticatedUser
+	}
+
+	test("ordinary install stays unpublished when terminal authority wins after capture") {
+		val events = mutableListOf<String>()
+		val fixture = SessionRepositoryFixture(events)
+		val candidate = fixture.session(accessToken = "candidate-token")
+		val authorityCaptured = CompletableDeferred<Unit>()
+		val releaseCurrentUser = CompletableDeferred<Unit>()
+		fixture.clearPublishedIdentity()
+		fixture.pauseCurrentUserLookupFor(candidate, releaseCurrentUser)
+		fixture.captureAuthorityFor(candidate, authorityCaptured)
+		val repository = fixture.repository(RecordingPlaybackQuiescePort(events))
+
+		coroutineScope {
+			val switching = async { repository.switchCurrentSession(candidate) }
+			authorityCaptured.await()
+			fixture.invalidateAuthority()
+			releaseCurrentUser.complete(Unit)
+
+			switching.await().shouldBeFalse()
+		}
+
+		repository.currentSession.value shouldBe null
+		fixture.userState.value shouldBe null
+		fixture.serverState.value shouldBe null
+	}
+
+	test("ordinary preparing snapshot cannot replace newer same-generation committed cleanup") {
+		val events = mutableListOf<String>()
+		val fixture = SessionRepositoryFixture(events)
+		val candidate = fixture.session(accessToken = "candidate-token").copy(deviceId = "device")
+		val switchId = UUID.randomUUID()
+		val preparingEnvelope = AuthenticationSessionEnvelope(
+			activeProfile = AuthenticationActiveProfileSession(
+				profileUserId = candidate.userId,
+				accessToken = candidate.accessToken,
+				deviceId = candidate.deviceId!!,
+			),
+			pendingSwitch = AuthenticationPendingSwitch(
+				switchId = switchId,
+				targetProfileUserId = UUID.randomUUID(),
+				oldProfileUserId = candidate.userId,
+				oldSessionEpoch = 0,
+				phase = AuthenticationPendingSwitchPhase.PREPARING,
+				createdAtEpochMillis = 1,
+			),
+		)
+		val preparingAuthority = AuthenticationAuthoritySnapshot(generation = 5, envelope = preparingEnvelope)
+		val pending = preparingEnvelope.pendingSwitch!!
+		val committedEnvelope = preparingEnvelope.copy(
+			activeProfile = preparingEnvelope.activeProfile!!.copy(
+				profileUserId = pending.targetProfileUserId,
+				accessToken = "committed-token",
+			),
+			sessionEpoch = 1,
+			pendingSwitch = pending.copy(phase = AuthenticationPendingSwitchPhase.INSTALLING),
+			cleanupMarker = AuthenticationCommittedPendingCleanup(switchId),
+		)
+		val committedAuthority = preparingAuthority.copy(envelope = committedEnvelope)
+		val authorityCaptured = CompletableDeferred<Unit>()
+		val releaseCurrentUser = CompletableDeferred<Unit>()
+		fixture.clearPublishedIdentity()
+		fixture.pauseCurrentUserLookupFor(candidate, releaseCurrentUser)
+		fixture.useAuthority(candidate.serverId, preparingAuthority)
+		fixture.captureAuthorityFor(candidate, authorityCaptured)
+		val repository = fixture.repository(RecordingPlaybackQuiescePort(events))
+
+		coroutineScope {
+			val switching = async { repository.switchCurrentSession(candidate) }
+			authorityCaptured.await()
+			fixture.installNewerAuthority(committedAuthority)
+			releaseCurrentUser.complete(Unit)
+
+			switching.await().shouldBeFalse()
+		}
+
+		repository.currentSession.value shouldBe null
+		fixture.userState.value shouldBe null
+		fixture.serverState.value shouldBe null
+		fixture.authoritySnapshot() shouldBe committedAuthority
+	}
+
+	test("committed install persists the exact durable envelope") {
+		val events = mutableListOf<String>()
+		val fixture = SessionRepositoryFixture(events)
+		val deviceId = "committed-device"
+		val session = fixture.session(accessToken = "committed-token").copy(
+			deviceId = deviceId,
+			sessionEpoch = 11,
+		)
+		val cleanupSwitchId = UUID.randomUUID()
+		val durableEnvelope = AuthenticationSessionEnvelope(
+			activeProfile = AuthenticationActiveProfileSession(
+				profileUserId = session.userId,
+				accessToken = session.accessToken,
+				deviceId = deviceId,
+			),
+			sessionEpoch = session.sessionEpoch,
+			cleanupMarker = AuthenticationCommittedPendingCleanup(cleanupSwitchId),
+		)
+		val authority = AuthenticationAuthoritySnapshot(generation = 7, envelope = durableEnvelope)
+		fixture.allowCurrentUserLookupFor(session)
+		fixture.useAuthority(session.serverId, authority)
+		val repository = fixture.repository(RecordingPlaybackQuiescePort(events))
+		val snapshot = SessionSnapshot(
+			serverId = session.serverId,
+			deviceId = deviceId,
+			profileUserId = session.userId,
+			credential = ActiveProfileCredential.fromToken(session.accessToken),
+			sessionEpoch = session.sessionEpoch,
+		)
+
+		repository.installCommittedSession(snapshot) shouldBe true
+
+		repository.currentSession.value shouldBe session
+		fixture.verifyExactEnvelopeReplacement(session.serverId, authority)
+	}
+
+	test("committed install rejects a durable owner authority mismatch before publication") {
+		val events = mutableListOf<String>()
+		val fixture = SessionRepositoryFixture(events)
+		val deviceId = "committed-device"
+		val session = fixture.session(accessToken = "committed-token").copy(
+			deviceId = deviceId,
+			profileSelectorId = UUID.randomUUID(),
+			ownerUserId = UUID.randomUUID(),
+			sessionEpoch = 11,
+		)
+		val durableEnvelope = AuthenticationSessionEnvelope(
+			activeProfile = AuthenticationActiveProfileSession(
+				profileUserId = session.userId,
+				accessToken = session.accessToken,
+				deviceId = deviceId,
+				profileSelectorId = session.profileSelectorId,
+				ownerUserId = session.ownerUserId,
+			),
+			sessionEpoch = session.sessionEpoch,
+			cleanupMarker = AuthenticationCommittedPendingCleanup(UUID.randomUUID()),
+		)
+		fixture.clearPublishedIdentity()
+		fixture.useAuthority(
+			session.serverId,
+			AuthenticationAuthoritySnapshot(generation = 7, envelope = durableEnvelope),
+		)
+		val repository = fixture.repository(RecordingPlaybackQuiescePort(events))
+		val mismatchedSnapshot = SessionSnapshot(
+			serverId = session.serverId,
+			deviceId = deviceId,
+			profileUserId = session.userId,
+			credential = ActiveProfileCredential.fromToken(session.accessToken),
+			sessionEpoch = session.sessionEpoch,
+			profileSelectorId = session.profileSelectorId,
+			ownerUserId = UUID.randomUUID(),
+		)
+
+		repository.installCommittedSession(mismatchedSnapshot).shouldBeFalse()
+
+		repository.currentSession.value shouldBe null
+		fixture.userState.value shouldBe null
+		fixture.serverState.value shouldBe null
+		fixture.verifyNoEnvelopeReplacement()
+	}
 })
 
 private class RecordingPlaybackQuiescePort(
@@ -260,6 +465,7 @@ private class SessionRepositoryFixture(
 	private var apiAccessToken: String? = null
 	private var apiClientInfo = defaultClientInfo
 	private var apiDeviceInfo = defaultDeviceInfo
+	private var currentAuthority: AuthenticationAuthoritySnapshot? = null
 	private val apiClient = mockk<ApiClient>(relaxed = true) {
 		every { baseUrl } answers { apiBaseUrl }
 		every { accessToken } answers { apiAccessToken }
@@ -297,6 +503,11 @@ private class SessionRepositoryFixture(
 	}
 
 	init {
+		every { authenticationStore.replaceSessionEnvelope(any(), any(), any(), any()) } answers {
+			val expected = secondArg<AuthenticationAuthoritySnapshot>()
+			val updated = thirdArg<AuthenticationSessionEnvelope>()
+			if (currentAuthority != expected) null else expected.copy(envelope = updated).also { currentAuthority = it }
+		}
 		every {
 			telemetryPreferences[TelemetryPreferences.crashReportUrl] = ""
 		} answers { events += "clear-crash-url" }
@@ -324,13 +535,79 @@ private class SessionRepositoryFixture(
 		coEvery { apiClient.request(any(), any(), any(), any(), any()) } throws ApiClientException()
 	}
 
+	fun mismatchCurrentUserLookupFor(session: Session) {
+		configureServer(session)
+		val mismatchedUser = mockk<UserDto> {
+			every { id } returns UUID.randomUUID()
+		}
+		val userApi = mockk<UserApi> {
+			coEvery { getCurrentUser() } returns Response(mismatchedUser, 200, emptyMap())
+		}
+		every { apiClient.getOrCreateApi(UserApi::class, any()) } returns userApi
+	}
+
 	fun allowCurrentUserLookupFor(session: Session) {
 		configureServer(session)
+		every { authenticatedUser.id } returns session.userId
 		val userApi = mockk<UserApi> {
 			coEvery { getCurrentUser() } returns Response(authenticatedUser, 200, emptyMap())
 		}
 		every { apiClient.getOrCreateApi(UserApi::class, any()) } returns userApi
 		every { apiClient.getOrCreateApi(ClientLogApi::class, any()) } returns mockk(relaxed = true)
+	}
+
+	fun pauseCurrentUserLookupFor(session: Session, release: CompletableDeferred<Unit>) {
+		configureServer(session)
+		every { authenticatedUser.id } returns session.userId
+		val userApi = mockk<UserApi> {
+			coEvery { getCurrentUser() } coAnswers {
+				release.await()
+				Response(authenticatedUser, 200, emptyMap())
+			}
+		}
+		every { apiClient.getOrCreateApi(UserApi::class, any()) } returns userApi
+		every { apiClient.getOrCreateApi(ClientLogApi::class, any()) } returns mockk(relaxed = true)
+	}
+
+	fun captureAuthorityFor(session: Session, captured: CompletableDeferred<Unit>) {
+		every { authenticationStore.getAuthoritySnapshot(session.serverId) } answers {
+			captured.complete(Unit)
+			currentAuthority
+		}
+	}
+
+	fun invalidateAuthority() {
+		currentAuthority = currentAuthority?.let { authority ->
+			authority.copy(generation = authority.generation + 1, envelope = null)
+		}
+	}
+
+	fun useAuthority(serverId: UUID, authority: AuthenticationAuthoritySnapshot) {
+		currentAuthority = authority
+		every { authenticationStore.getAuthoritySnapshot(serverId) } returns authority
+	}
+
+	fun installNewerAuthority(authority: AuthenticationAuthoritySnapshot) {
+		currentAuthority = authority
+	}
+
+	fun authoritySnapshot(): AuthenticationAuthoritySnapshot? = currentAuthority
+
+	fun verifyExactEnvelopeReplacement(serverId: UUID, authority: AuthenticationAuthoritySnapshot) {
+		verify(exactly = 1) {
+			authenticationStore.replaceSessionEnvelope(
+				serverId,
+				authority,
+				authority.envelope!!,
+				false,
+			)
+		}
+	}
+
+	fun verifyNoEnvelopeReplacement() {
+		verify(exactly = 0) {
+			authenticationStore.replaceSessionEnvelope(any(), any(), any(), any())
+		}
 	}
 
 	fun apiIdentity() = RecordedApiIdentity(
@@ -363,6 +640,25 @@ private class SessionRepositoryFixture(
 		accessToken = accessToken,
 	)
 
+	fun configureLastUserRestore(session: Session, ownerUserId: UUID) {
+		every { authenticationPreferences[AuthenticationPreferences.alwaysAuthenticate] } returns false
+		every {
+			authenticationPreferences[AuthenticationPreferences.autoLoginUserBehavior]
+		} returns UserSelectBehavior.LAST_USER
+		every { authenticationPreferences[AuthenticationPreferences.lastServerId] } returns session.serverId.toString()
+		every { authenticationPreferences[AuthenticationPreferences.lastUserId] } returns session.userId.toString()
+		every { authenticationPreferences[AuthenticationPreferences.lastOwnerUserId] } returns ownerUserId.toString()
+		every {
+			authenticationStore.getAuthoritySnapshot(session.serverId)
+		} returns AuthenticationAuthoritySnapshot(generation = 0, envelope = null)
+		every { authenticationStore.getUser(session.serverId, session.userId) } returns AuthenticationStoreUser(
+			name = "Active profile",
+			accessToken = session.accessToken,
+			profileSelectorId = session.profileSelectorId,
+			profileSelectorOwnerUserId = ownerUserId,
+		)
+	}
+
 	private fun configureServer(session: Session) {
 		val server = Server(
 			id = session.serverId,
@@ -376,6 +672,8 @@ private class SessionRepositoryFixture(
 			address = server.address,
 			version = server.version,
 		)
+		currentAuthority = AuthenticationAuthoritySnapshot(generation = 0, envelope = null)
+		every { authenticationStore.getAuthoritySnapshot(session.serverId) } answers { currentAuthority }
 	}
 }
 

@@ -162,19 +162,19 @@ class AuthenticationRepositoryImpl(
 	}.flowOn(Dispatchers.IO)
 
 	private suspend fun authenticateFinish(server: Server, userInfo: UserDto, accessToken: String) {
-		val currentUser = authenticationStore.getUser(server.id, userInfo.id)
-
-		val updatedUser = currentUser?.copy(
-			name = userInfo.name!!,
-			lastUsed = Instant.now().toEpochMilli(),
-			imageTag = userInfo.primaryImage?.tag,
-			accessToken = accessToken,
-		) ?: AuthenticationStoreUser(
+		val authenticatedUser = AuthenticationStoreUser(
 			name = userInfo.name!!,
 			imageTag = userInfo.primaryImage?.tag,
 			accessToken = accessToken,
 		)
-		authenticationStore.putUser(server.id, userInfo.id, updatedUser)
+		authenticationStore.updateUser(server.id, userInfo.id, create = authenticatedUser) { current ->
+			current.copy(
+				name = userInfo.name!!,
+				lastUsed = Instant.now().toEpochMilli(),
+				imageTag = userInfo.primaryImage?.tag,
+				accessToken = accessToken,
+			)
+		}
 	}
 
 	private suspend fun setActiveSession(user: User, server: Server): Boolean {
@@ -182,12 +182,11 @@ class AuthenticationRepositoryImpl(
 
 		if (authenticated) {
 			// Update last use in store
-			authenticationStore.getServer(server.id)?.let { storedServer ->
-				authenticationStore.putServer(server.id, storedServer.copy(lastUsed = Instant.now().toEpochMilli()))
+			authenticationStore.updateServer(server.id) { current ->
+				current.copy(lastUsed = Instant.now().toEpochMilli())
 			}
-
-			authenticationStore.getUser(server.id, user.id)?.let { storedUser ->
-				authenticationStore.putUser(server.id, user.id, storedUser.copy(lastUsed = Instant.now().toEpochMilli()))
+			authenticationStore.updateUser(server.id, user.id) { current ->
+				current.copy(lastUsed = Instant.now().toEpochMilli())
 			}
 		}
 
@@ -195,12 +194,7 @@ class AuthenticationRepositoryImpl(
 	}
 
 	override fun logout(user: User): Boolean {
-		val authStoreUser = authenticationStore
-			.getUser(user.serverId, user.id)
-			?.copy(accessToken = null)
-
-		return if (authStoreUser != null) authenticationStore.putUser(user.serverId, user.id, authStoreUser)
-		else false
+		return authenticationStore.invalidateUser(user.serverId, user.id)
 	}
 
 	override fun getUserImageUrl(server: Server, user: User): String? = user.imageTag?.let { primaryImageTag ->

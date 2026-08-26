@@ -26,6 +26,7 @@ import org.jellyfin.androidtv.auth.repository.ServerUserRepository
 import org.jellyfin.androidtv.auth.repository.Session
 import org.jellyfin.androidtv.auth.repository.SessionRepository
 import org.jellyfin.androidtv.auth.repository.SessionRepositoryState
+import org.jellyfin.androidtv.auth.session.SessionSnapshot
 import org.jellyfin.androidtv.auth.store.AuthenticationPreferences
 import org.jellyfin.androidtv.data.model.AppNotification
 import org.jellyfin.androidtv.data.repository.NotificationsRepository
@@ -261,6 +262,7 @@ private class SessionlessSessionRepository : SessionRepository {
 	override suspend fun restoreSession(destroyOnly: Boolean) = unexpectedCall()
 	override suspend fun switchCurrentSession(serverId: UUID, userId: UUID) = unexpectedCall()
 	override suspend fun switchCurrentSession(session: Session) = unexpectedCall()
+	override suspend fun installCommittedSession(snapshot: SessionSnapshot) = unexpectedCall()
 	override suspend fun prepareForProfileSelection() = unexpectedCall()
 	override suspend fun destroyCurrentSession() = unexpectedCall()
 }

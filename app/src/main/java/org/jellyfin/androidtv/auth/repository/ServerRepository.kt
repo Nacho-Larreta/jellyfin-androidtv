@@ -145,24 +145,14 @@ class ServerRepositoryImpl(
 
 			val id = systemInfo.id!!.toUUID()
 
-			val server = authenticationStore.getServer(id)?.copy(
-				name = systemInfo.serverName ?: "Jellyfin Server",
+			storeDiscoveredServer(id, DiscoveredServer(
+				name = systemInfo.serverName,
 				address = chosenRecommendation.address,
 				version = systemInfo.version,
 				loginDisclaimer = branding.loginDisclaimer,
 				splashscreenEnabled = branding.splashscreenEnabled,
-				setupCompleted = systemInfo.startupWizardCompleted ?: true,
-				lastUsed = Instant.now().toEpochMilli()
-			) ?: AuthenticationStoreServer(
-				name = systemInfo.serverName ?: "Jellyfin Server",
-				address = chosenRecommendation.address,
-				version = systemInfo.version,
-				loginDisclaimer = branding.loginDisclaimer,
-				splashscreenEnabled = branding.splashscreenEnabled,
-				setupCompleted = systemInfo.startupWizardCompleted ?: true,
-			)
-
-			authenticationStore.putServer(id, server)
+				setupCompleted = systemInfo.startupWizardCompleted,
+			))
 			loadStoredServers()
 
 			emit(ConnectedState(id, systemInfo))
@@ -213,27 +203,56 @@ class ServerRepositoryImpl(
 		val now = Instant.now().toEpochMilli()
 
 		// Only update every 10 minutes
-		if (now - server.lastRefreshed < 600000 && server.version != null && !forceUpdate) return null
+		if (now - server.lastRefreshed < SERVER_REFRESH_INTERVAL_MILLIS && server.version != null && !forceUpdate) return null
 
-		val newServer = withContext(Dispatchers.IO) {
+		val refreshed = withContext(Dispatchers.IO) {
 			val api = jellyfin.createApi(server.address)
 
 			// Get login disclaimer
 			val branding = api.getBrandingOptionsOrDefault()
 			val systemInfo by api.systemApi.getPublicSystemInfo()
 
-			server.copy(
-				name = systemInfo.serverName ?: server.name,
-				version = systemInfo.version ?: server.version,
-				loginDisclaimer = branding.loginDisclaimer ?: server.loginDisclaimer,
+			ServerRefresh(
+				name = systemInfo.serverName,
+				version = systemInfo.version,
+				loginDisclaimer = branding.loginDisclaimer,
 				splashscreenEnabled = branding.splashscreenEnabled,
-				setupCompleted = systemInfo.startupWizardCompleted ?: server.setupCompleted,
-				lastRefreshed = now
+				setupCompleted = systemInfo.startupWizardCompleted,
 			)
 		}
-		authenticationStore.putServer(id, newServer)
+		val stored = authenticationStore.updateServer(id) { current ->
+			current.copy(
+				name = refreshed.name ?: current.name,
+				version = refreshed.version ?: current.version,
+				loginDisclaimer = refreshed.loginDisclaimer ?: current.loginDisclaimer,
+				splashscreenEnabled = refreshed.splashscreenEnabled,
+				setupCompleted = refreshed.setupCompleted ?: current.setupCompleted,
+				lastRefreshed = now,
+			)
+		}
+		return if (stored) authenticationStore.getServer(id) else null
+	}
 
-		return newServer
+	private fun storeDiscoveredServer(id: UUID, discovered: DiscoveredServer) {
+		val newServer = AuthenticationStoreServer(
+			name = discovered.name ?: "Jellyfin Server",
+			address = discovered.address,
+			version = discovered.version,
+			loginDisclaimer = discovered.loginDisclaimer,
+			splashscreenEnabled = discovered.splashscreenEnabled,
+			setupCompleted = discovered.setupCompleted ?: true,
+		)
+		authenticationStore.updateServer(id, create = newServer) { current ->
+			current.copy(
+				name = discovered.name ?: current.name,
+				address = discovered.address,
+				version = discovered.version ?: current.version,
+				loginDisclaimer = discovered.loginDisclaimer ?: current.loginDisclaimer,
+				splashscreenEnabled = discovered.splashscreenEnabled,
+				setupCompleted = discovered.setupCompleted ?: current.setupCompleted,
+				lastUsed = Instant.now().toEpochMilli(),
+			)
+		}
 	}
 
 	override suspend fun deleteServer(server: UUID): Boolean {
@@ -269,3 +288,22 @@ class ServerRepositoryImpl(
 		)
 	}
 }
+
+private data class ServerRefresh(
+	val name: String?,
+	val version: String?,
+	val loginDisclaimer: String?,
+	val splashscreenEnabled: Boolean,
+	val setupCompleted: Boolean?,
+)
+
+private data class DiscoveredServer(
+	val name: String?,
+	val address: String,
+	val version: String?,
+	val loginDisclaimer: String?,
+	val splashscreenEnabled: Boolean,
+	val setupCompleted: Boolean?,
+)
+
+private const val SERVER_REFRESH_INTERVAL_MILLIS = 600_000L
