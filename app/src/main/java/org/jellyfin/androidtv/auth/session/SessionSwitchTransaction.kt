@@ -34,7 +34,7 @@ internal class SessionSwitchTransaction(
 		environment.barrier.recoverClosed(envelope.activeProfile)
 		envelope.cleanupMarker?.let { cleanup ->
 			recovery.installCommitted(envelope, cleanup.switchId)
-			return SessionSwitchOutcome.CommittedPendingCleanup(envelope.activeProfile)
+			return SessionSwitchOutcome.CommittedPendingCleanup(cleanup.switchId, envelope.activeProfile)
 		}
 
 		val pending = envelope.pendingSwitch ?: run {
@@ -65,7 +65,7 @@ internal class SessionSwitchTransaction(
 			validateDurableRequest(request, envelope, cleanupRequired = true)
 			environment.barrier.close(envelope.activeProfile)
 			recovery.installCommitted(envelope, request.switchId)
-			return SessionSwitchOutcome.CommittedPendingCleanup(envelope.activeProfile)
+			return SessionSwitchOutcome.CommittedPendingCleanup(request.switchId, envelope.activeProfile)
 		}
 
 		val pending = envelope.pendingSwitch ?: return null

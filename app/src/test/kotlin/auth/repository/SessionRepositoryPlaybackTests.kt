@@ -41,6 +41,25 @@ import org.jellyfin.sdk.model.api.UserDto
 import java.util.UUID
 
 class SessionRepositoryPlaybackTests : FunSpec({
+	test("repository starts closed until deferred restoration is explicitly published") {
+		val events = mutableListOf<String>()
+		val fixture = SessionRepositoryFixture(events).apply {
+			every { authenticationPreferences[AuthenticationPreferences.alwaysAuthenticate] } returns true
+			every {
+				authenticationPreferences[AuthenticationPreferences.autoLoginUserBehavior]
+			} returns UserSelectBehavior.LAST_USER
+		}
+		val repository = fixture.repository(RecordingPlaybackQuiescePort(events))
+
+		repository.state.value shouldBe SessionRepositoryState.RESTORING_SESSION
+		repository.restoreSessionForBootstrap()
+		repository.state.value shouldBe SessionRepositoryState.RESTORING_SESSION
+
+		repository.publishSessionReady()
+
+		repository.state.value shouldBe SessionRepositoryState.READY
+	}
+
 	test("destroying a session quiesces playback before clearing identity") {
 		val events = mutableListOf<String>()
 		val fixture = SessionRepositoryFixture(events)

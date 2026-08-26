@@ -19,7 +19,7 @@ class SessionSwitchCoordinatorTests : FunSpec({
 
 		val outcome = fixture.coordinator().switch(fixture.request)
 
-		outcome shouldBe SessionSwitchOutcome.CommittedPendingCleanup(fixture.targetSnapshot())
+		outcome shouldBe SessionSwitchOutcome.CommittedPendingCleanup(fixture.request.switchId, fixture.targetSnapshot())
 		fixture.events.shouldContainExactly(
 			"store:PREPARING:old",
 			"prepare:Active",
@@ -385,7 +385,10 @@ class SessionSwitchCoordinatorTests : FunSpec({
 
 			val recovered = fixture.coordinator().recover(fixture.serverId)
 			if (failedWrite == 4) {
-				recovered shouldBe SessionSwitchOutcome.CommittedPendingCleanup(fixture.targetSnapshot())
+				recovered shouldBe SessionSwitchOutcome.CommittedPendingCleanup(
+					fixture.request.switchId,
+					fixture.targetSnapshot(),
+				)
 			} else {
 				recovered shouldBe SessionSwitchOutcome.Restored(fixture.oldSnapshot)
 			}

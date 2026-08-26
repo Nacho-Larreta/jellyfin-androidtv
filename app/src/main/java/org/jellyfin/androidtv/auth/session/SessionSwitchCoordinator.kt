@@ -32,15 +32,21 @@ data class SessionSwitchEnvironment(
 	val clock: Clock = Clock.systemUTC(),
 )
 
+interface SessionSwitchOperations {
+	suspend fun switch(request: SessionSwitchRequest): SessionSwitchOutcome
+	suspend fun recover(serverId: UUID): SessionSwitchOutcome?
+	suspend fun completeCleanup(serverId: UUID, switchId: UUID): SessionSnapshot
+}
+
 class SessionSwitchCoordinator(
 	environment: SessionSwitchEnvironment,
-) {
+) : SessionSwitchOperations {
 	private val ownershipMutex = Mutex()
 	private val operationMutex = Mutex()
 	private var inFlight: InFlightSwitch? = null
 	private val transaction = SessionSwitchTransaction(environment)
 
-	suspend fun switch(request: SessionSwitchRequest): SessionSwitchOutcome {
+	override suspend fun switch(request: SessionSwitchRequest): SessionSwitchOutcome {
 		val ownership = acquire(request)
 		if (!ownership.owner) return ownership.completion.await().getOrThrow()
 
@@ -54,11 +60,11 @@ class SessionSwitchCoordinator(
 		return result.getOrThrow()
 	}
 
-	suspend fun recover(serverId: UUID): SessionSwitchOutcome? = withContext(NonCancellable) {
+	override suspend fun recover(serverId: UUID): SessionSwitchOutcome? = withContext(NonCancellable) {
 		operationMutex.withLock { transaction.recover(serverId) }
 	}
 
-	suspend fun completeCleanup(serverId: UUID, switchId: UUID): SessionSnapshot = withContext(NonCancellable) {
+	override suspend fun completeCleanup(serverId: UUID, switchId: UUID): SessionSnapshot = withContext(NonCancellable) {
 		operationMutex.withLock { transaction.completeCleanup(serverId, switchId) }
 	}
 

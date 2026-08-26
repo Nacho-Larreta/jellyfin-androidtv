@@ -20,6 +20,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.flowWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
@@ -35,6 +36,8 @@ import org.jellyfin.androidtv.auth.repository.ProfileSelectorStartupAction
 import org.jellyfin.androidtv.auth.repository.SessionRepository
 import org.jellyfin.androidtv.auth.repository.SessionRepositoryState
 import org.jellyfin.androidtv.auth.repository.UserRepository
+import org.jellyfin.androidtv.auth.session.SessionBootstrapCoordinator
+import org.jellyfin.androidtv.auth.session.SessionBootstrapState
 import org.jellyfin.androidtv.databinding.ActivityStartupBinding
 import org.jellyfin.androidtv.ui.background.AppBackground
 import org.jellyfin.androidtv.ui.browsing.MainActivity
@@ -70,6 +73,7 @@ class StartupActivity : FragmentActivity(), ProfileSelectorFragment.Host {
 	}
 	private val api: ApiClient by inject()
 	private val profileSelectorRepository: ProfileSelectorRepository by inject()
+	private val sessionBootstrapCoordinator: SessionBootstrapCoordinator by inject()
 	private val sessionRepository: SessionRepository by inject()
 	private val userRepository: UserRepository by inject()
 	private val navigationRepository: NavigationRepository by inject()
@@ -162,9 +166,14 @@ class StartupActivity : FragmentActivity(), ProfileSelectorFragment.Host {
 		applyTheme()
 	}
 
-	private fun onPermissionsGranted() = sessionRepository.state
+	private fun onPermissionsGranted() = combine(
+		sessionBootstrapCoordinator.state,
+		sessionRepository.state,
+	) { bootstrapState, repositoryState ->
+		bootstrapState == SessionBootstrapState.READY && repositoryState == SessionRepositoryState.READY
+	}
 		.flowWithLifecycle(lifecycle, Lifecycle.State.RESUMED)
-		.filter { it == SessionRepositoryState.READY }
+		.filter { it }
 		.map { sessionRepository.currentSession.value }
 		.distinctUntilChanged()
 		.onEach { session ->

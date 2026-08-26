@@ -12,6 +12,7 @@ import androidx.compose.ui.platform.ComposeView
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentFactory
 import coil3.ImageLoader
+import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,6 +27,8 @@ import org.jellyfin.androidtv.auth.repository.ServerUserRepository
 import org.jellyfin.androidtv.auth.repository.Session
 import org.jellyfin.androidtv.auth.repository.SessionRepository
 import org.jellyfin.androidtv.auth.repository.SessionRepositoryState
+import org.jellyfin.androidtv.auth.session.SessionBootstrapCoordinator
+import org.jellyfin.androidtv.auth.session.SessionBootstrapState
 import org.jellyfin.androidtv.auth.session.SessionSnapshot
 import org.jellyfin.androidtv.auth.store.AuthenticationPreferences
 import org.jellyfin.androidtv.data.model.AppNotification
@@ -59,6 +62,7 @@ import java.util.UUID
 @Config(application = Application::class, sdk = [Build.VERSION_CODES.UPSIDE_DOWN_CAKE])
 class StartupActivityColdStartTests {
 	private val probe = ColdStartProbe()
+	private lateinit var bootstrapState: MutableStateFlow<SessionBootstrapState>
 	private lateinit var sessionRepository: SessionlessSessionRepository
 
 	@Before
@@ -67,11 +71,16 @@ class StartupActivityColdStartTests {
 		val application: Application = RuntimeEnvironment.getApplication()
 		val userPreferences = UserPreferences(application)
 		sessionRepository = SessionlessSessionRepository()
+		bootstrapState = MutableStateFlow(SessionBootstrapState.READY)
+		val sessionBootstrapCoordinator = mockk<SessionBootstrapCoordinator> {
+			every { state } returns bootstrapState
+		}
 
 		startKoin {
 			androidContext(application)
 			modules(module {
 				single { userPreferences }
+				single { sessionBootstrapCoordinator }
 				single { createBackgroundService(application, userPreferences) }
 				single<SessionRepository> { sessionRepository }
 				single<NotificationsRepository> { EmptyNotificationsRepository() }
@@ -160,7 +169,7 @@ class StartupActivityColdStartTests {
 
 	@Test
 	fun `deferred background attachment preserves the current focus owner`() {
-		sessionRepository.pauseRouting()
+		bootstrapState.value = SessionBootstrapState.CLOSED
 		val application: Application = RuntimeEnvironment.getApplication()
 		shadowOf(application).grantPermissions(
 			Manifest.permission.INTERNET,
@@ -255,11 +264,10 @@ private class SessionlessSessionRepository : SessionRepository {
 	private val mutableState = MutableStateFlow(SessionRepositoryState.READY)
 	override val state: StateFlow<SessionRepositoryState> = mutableState
 
-	fun pauseRouting() {
-		mutableState.value = SessionRepositoryState.RESTORING_SESSION
-	}
-
 	override suspend fun restoreSession(destroyOnly: Boolean) = unexpectedCall()
+	override suspend fun restoreSessionForBootstrap() = unexpectedCall()
+	override suspend fun publishSessionReady() = unexpectedCall()
+	override suspend fun failSessionRestore() = unexpectedCall()
 	override suspend fun switchCurrentSession(serverId: UUID, userId: UUID) = unexpectedCall()
 	override suspend fun switchCurrentSession(session: Session) = unexpectedCall()
 	override suspend fun installCommittedSession(snapshot: SessionSnapshot) = unexpectedCall()

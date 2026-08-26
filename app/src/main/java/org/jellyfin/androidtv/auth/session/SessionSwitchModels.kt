@@ -121,7 +121,16 @@ data class ServerSwitchResult(
 )
 
 sealed interface SessionSwitchOutcome {
-	data class CommittedPendingCleanup(val snapshot: SessionSnapshot) : SessionSwitchOutcome
+	data class CommittedPendingCleanup(
+		val switchId: UUID,
+		val snapshot: SessionSnapshot,
+	) : SessionSwitchOutcome
+
+	data class Completed(
+		val switchId: UUID,
+		val snapshot: SessionSnapshot,
+	) : SessionSwitchOutcome
+
 	data class Restored(val snapshot: SessionSnapshot) : SessionSwitchOutcome
 }
 

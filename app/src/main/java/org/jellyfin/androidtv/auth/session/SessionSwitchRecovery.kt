@@ -59,7 +59,7 @@ internal class SessionSwitchRecovery(
 		)
 		val persistedEnvelope = persistence.replace(envelope, committedEnvelope)
 		installCommitted(persistedEnvelope, pending.switchId)
-		return SessionSwitchOutcome.CommittedPendingCleanup(persistedEnvelope.activeProfile)
+		return SessionSwitchOutcome.CommittedPendingCleanup(pending.switchId, persistedEnvelope.activeProfile)
 	}
 
 	suspend fun installCommitted(envelope: SessionEnvelope, switchId: UUID) {

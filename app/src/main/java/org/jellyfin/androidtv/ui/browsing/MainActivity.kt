@@ -20,6 +20,8 @@ import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.auth.repository.SessionRepository
 import org.jellyfin.androidtv.auth.repository.SessionRepositoryState
 import org.jellyfin.androidtv.auth.repository.UserRepository
+import org.jellyfin.androidtv.auth.session.SessionBootstrapCoordinator
+import org.jellyfin.androidtv.auth.session.SessionBootstrapState
 import org.jellyfin.androidtv.integration.LeanbackChannelWorker
 import org.jellyfin.androidtv.ui.InteractionTrackerViewModel
 import org.jellyfin.androidtv.ui.background.AppBackground
@@ -39,6 +41,7 @@ import timber.log.Timber
 
 class MainActivity : FragmentActivity() {
 	private val navigationRepository by inject<NavigationRepository>()
+	private val sessionBootstrapCoordinator by inject<SessionBootstrapCoordinator>()
 	private val sessionRepository by inject<SessionRepository>()
 	private val userRepository by inject<UserRepository>()
 	private val interactionTrackerViewModel by viewModel<InteractionTrackerViewModel>()
@@ -93,10 +96,7 @@ class MainActivity : FragmentActivity() {
 	}
 
 	private fun validateAuthentication(): Boolean {
-		if (sessionRepository.state.value != SessionRepositoryState.READY ||
-			sessionRepository.currentSession.value == null ||
-			userRepository.currentUser.value == null
-		) {
+		if (!isAuthenticatedRuntimeReady()) {
 			Timber.w("Activity ${this::class.qualifiedName} started without a ready session, bouncing to StartupActivity")
 			startActivity(Intent(this, StartupActivity::class.java))
 			finish()
@@ -104,6 +104,13 @@ class MainActivity : FragmentActivity() {
 		}
 
 		return true
+	}
+
+	private fun isAuthenticatedRuntimeReady(): Boolean {
+		if (sessionBootstrapCoordinator.state.value != SessionBootstrapState.READY) return false
+		if (sessionRepository.state.value != SessionRepositoryState.READY) return false
+		if (sessionRepository.currentSession.value == null) return false
+		return userRepository.currentUser.value != null
 	}
 
 	override fun onPause() {

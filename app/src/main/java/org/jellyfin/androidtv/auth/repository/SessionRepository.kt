@@ -54,6 +54,9 @@ interface SessionRepository {
 	val state: StateFlow<SessionRepositoryState>
 
 	suspend fun restoreSession(destroyOnly: Boolean)
+	suspend fun restoreSessionForBootstrap(): Session?
+	suspend fun publishSessionReady()
+	suspend fun failSessionRestore()
 	suspend fun switchCurrentSession(serverId: UUID, userId: UUID): Boolean
 	suspend fun switchCurrentSession(session: Session): Boolean
 	suspend fun installCommittedSession(snapshot: SessionSnapshot): Boolean
@@ -75,10 +78,22 @@ class SessionRepositoryImpl(
 	private val currentSessionMutex = Mutex()
 	private val _currentSession = MutableStateFlow<Session?>(null)
 	override val currentSession = _currentSession.asStateFlow()
-	private val _state = MutableStateFlow(SessionRepositoryState.READY)
+	private val _state = MutableStateFlow(SessionRepositoryState.RESTORING_SESSION)
 	override val state = _state.asStateFlow()
 
-	override suspend fun restoreSession(destroyOnly: Boolean): Unit = withContext(NonCancellable) {
+	override suspend fun restoreSession(destroyOnly: Boolean) {
+		restoreSession(destroyOnly = destroyOnly, publishReady = true)
+	}
+
+	override suspend fun restoreSessionForBootstrap(): Session? = restoreSession(
+		destroyOnly = false,
+		publishReady = false,
+	)
+
+	private suspend fun restoreSession(
+		destroyOnly: Boolean,
+		publishReady: Boolean,
+	): Session? = withContext(NonCancellable) {
 		currentSessionMutex.withLock {
 			Timber.i("Restoring session")
 
@@ -88,8 +103,8 @@ class SessionRepositoryImpl(
 			val autoLoginBehavior = authenticationPreferences[AuthenticationPreferences.autoLoginUserBehavior]
 
 			when {
-				alwaysAuthenticate -> destroyCurrentSessionLocked()
-				autoLoginBehavior == DISABLED -> destroyCurrentSessionLocked()
+				alwaysAuthenticate -> destroyCurrentSessionLocked(publishReady)
+				autoLoginBehavior == DISABLED -> destroyCurrentSessionLocked(publishReady)
 				autoLoginBehavior == LAST_USER && !destroyOnly -> setCurrentSessionLocked(createLastUserSession())
 				autoLoginBehavior == SPECIFIC_USER && !destroyOnly -> {
 					val serverId = authenticationPreferences[AuthenticationPreferences.autoLoginServerId].toUUIDOrNull()
@@ -98,7 +113,24 @@ class SessionRepositoryImpl(
 				}
 			}
 
+			_state.value = if (publishReady) SessionRepositoryState.READY else SessionRepositoryState.RESTORING_SESSION
+			_currentSession.value
+		}
+	}
+
+	override suspend fun publishSessionReady(): Unit = withContext(NonCancellable) {
+		currentSessionMutex.withLock {
+			check(_state.value == SessionRepositoryState.RESTORING_SESSION) {
+				"A session can only become ready after deferred restoration."
+			}
 			_state.value = SessionRepositoryState.READY
+		}
+	}
+
+	override suspend fun failSessionRestore(): Unit = withContext(NonCancellable) {
+		currentSessionMutex.withLock {
+			setCurrentSessionLocked(null)
+			_state.value = SessionRepositoryState.INVALIDATING_SESSION
 		}
 	}
 
@@ -131,6 +163,7 @@ class SessionRepositoryImpl(
 
 	override suspend fun installCommittedSession(snapshot: SessionSnapshot): Boolean = withContext(NonCancellable) {
 		currentSessionMutex.withLock {
+			val restoreInProgress = _state.value == SessionRepositoryState.RESTORING_SESSION
 			val authority = authenticationStore.getAuthoritySnapshot(snapshot.serverId)
 			val durable = authority?.envelope
 			if (durable?.matches(snapshot) != true) {
@@ -138,7 +171,11 @@ class SessionRepositoryImpl(
 			}
 			_state.value = SessionRepositoryState.SWITCHING_SESSION
 			val installed = setCurrentSessionLocked(snapshot.toSession(), authority)
-			_state.value = if (installed) SessionRepositoryState.READY else SessionRepositoryState.INVALIDATING_SESSION
+			_state.value = when {
+				!installed -> SessionRepositoryState.INVALIDATING_SESSION
+				restoreInProgress -> SessionRepositoryState.RESTORING_SESSION
+				else -> SessionRepositoryState.READY
+			}
 			installed
 		}
 	}
@@ -155,13 +192,13 @@ class SessionRepositoryImpl(
 		}
 	}
 
-	private suspend fun destroyCurrentSessionLocked() {
+	private suspend fun destroyCurrentSessionLocked(publishReady: Boolean = true) {
 		Timber.i("Destroying current session")
 
 		_state.value = SessionRepositoryState.INVALIDATING_SESSION
 		playbackQuiescePort.quiesceIfCreated()
 		setCurrentSessionLocked(null)
-		_state.value = SessionRepositoryState.READY
+		_state.value = if (publishReady) SessionRepositoryState.READY else SessionRepositoryState.RESTORING_SESSION
 	}
 
 	private suspend fun setCurrentSessionLocked(
@@ -204,7 +241,7 @@ class SessionRepositoryImpl(
 				Timber.e(err, "Unable to authenticate: bad response when getting user info")
 				_state.value = SessionRepositoryState.INVALIDATING_SESSION
 				restoreApiClientBinding(previousApiBinding)
-				destroyCurrentSessionLocked()
+				destroyCurrentSessionLocked(publishReady = false)
 				return false
 			} catch (err: SessionPersistenceException) {
 				Timber.e(err, "Unable to durably install the authenticated session")

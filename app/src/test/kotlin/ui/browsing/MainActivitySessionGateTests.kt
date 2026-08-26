@@ -9,6 +9,8 @@ import org.jellyfin.androidtv.auth.repository.Session
 import org.jellyfin.androidtv.auth.repository.SessionRepository
 import org.jellyfin.androidtv.auth.repository.SessionRepositoryState
 import org.jellyfin.androidtv.auth.repository.UserRepository
+import org.jellyfin.androidtv.auth.session.SessionBootstrapCoordinator
+import org.jellyfin.androidtv.auth.session.SessionBootstrapState
 import org.jellyfin.androidtv.preference.UserPreferences
 import org.jellyfin.androidtv.ui.InteractionTrackerViewModel
 import org.jellyfin.androidtv.ui.startup.StartupActivity
@@ -35,6 +37,8 @@ import java.util.UUID
 @Config(application = Application::class, sdk = [Build.VERSION_CODES.UPSIDE_DOWN_CAKE])
 class MainActivitySessionGateTests {
 	private val probe = MainActivityRuntimeProbe()
+	private lateinit var bootstrapState: MutableStateFlow<SessionBootstrapState>
+	private lateinit var repositoryState: MutableStateFlow<SessionRepositoryState>
 
 	@Before
 	fun setUp() {
@@ -45,9 +49,14 @@ class MainActivitySessionGateTests {
 			serverId = UUID.randomUUID(),
 			accessToken = "access-token",
 		)
+		repositoryState = MutableStateFlow(SessionRepositoryState.INVALIDATING_SESSION)
 		val sessionRepository = mockk<SessionRepository> {
 			every { currentSession } returns MutableStateFlow(session)
-			every { state } returns MutableStateFlow(SessionRepositoryState.INVALIDATING_SESSION)
+			every { state } returns repositoryState
+		}
+		bootstrapState = MutableStateFlow(SessionBootstrapState.READY)
+		val sessionBootstrapCoordinator = mockk<SessionBootstrapCoordinator> {
+			every { state } returns bootstrapState
 		}
 		val userRepository = mockk<UserRepository> {
 			every { currentUser } returns MutableStateFlow(mockk<UserDto>(relaxed = true))
@@ -57,6 +66,7 @@ class MainActivitySessionGateTests {
 			androidContext(application)
 			modules(module {
 				single { UserPreferences(application) }
+				single { sessionBootstrapCoordinator }
 				single<SessionRepository> { sessionRepository }
 				single<UserRepository> { userRepository }
 				viewModel<InteractionTrackerViewModel> { probe.resolveAuthenticatedRuntime() }
@@ -71,6 +81,23 @@ class MainActivitySessionGateTests {
 
 	@Test
 	fun `invalidating session cannot enter the authenticated activity`() {
+		Robolectric.buildActivity(MainActivity::class.java).use { controller ->
+			val activity = controller.create().get()
+
+			assertTrue(activity.isFinishing)
+			assertEquals(
+				StartupActivity::class.java.name,
+				shadowOf(activity).nextStartedActivity.component?.className,
+			)
+			assertEquals(0, probe.authenticatedRuntimeResolutions)
+		}
+	}
+
+	@Test
+	fun `closed bootstrap cannot enter the authenticated activity`() {
+		bootstrapState.value = SessionBootstrapState.CLOSED
+		repositoryState.value = SessionRepositoryState.READY
+
 		Robolectric.buildActivity(MainActivity::class.java).use { controller ->
 			val activity = controller.create().get()
 

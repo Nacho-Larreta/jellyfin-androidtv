@@ -7,7 +7,7 @@ import androidx.startup.AppInitializer
 import androidx.startup.Initializer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import org.jellyfin.androidtv.auth.repository.SessionRepository
+import org.jellyfin.androidtv.auth.session.SessionBootstrapCoordinator
 import org.jellyfin.androidtv.di.KoinInitializer
 
 @Suppress("unused")
@@ -19,7 +19,7 @@ class SessionInitializer : Initializer<Unit> {
 
 		// Restore system session
 		ProcessLifecycleOwner.get().lifecycleScope.launch(Dispatchers.IO) {
-			koin.get<SessionRepository>().restoreSession(destroyOnly = false)
+			koin.get<SessionBootstrapCoordinator>().initialize()
 		}
 	}
 
