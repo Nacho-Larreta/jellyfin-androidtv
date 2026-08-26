@@ -27,6 +27,19 @@ class ScreensaverDreamFallbackContractTests : FunSpec({
 	test("policy replay expires so lowering the ceiling cannot reuse a stale policy") {
 		dreamViewModelSource().contains("SharingStarted.WhileSubscribed(replayExpirationMillis = 0)").shouldBeTrue()
 	}
+
+	test("Dream forwards every bounded library query field without widening it") {
+		val source = dreamViewModelSource()
+
+		source.contains("includeItemTypes = query.includeItemTypes").shouldBeTrue()
+		source.contains("recursive = query.recursive").shouldBeTrue()
+		source.contains("sortBy = query.sortBy").shouldBeTrue()
+		source.contains("limit = query.limit").shouldBeTrue()
+		source.contains("imageTypes = query.imageTypes").shouldBeTrue()
+		source.contains("fields = query.fields").shouldBeTrue()
+		source.contains("maxOfficialRating = query.maxOfficialRating").shouldBeTrue()
+		source.contains("hasParentalRating = query.hasParentalRating").shouldBeTrue()
+	}
 })
 
 private fun dreamViewModelSource(): String = listOf(

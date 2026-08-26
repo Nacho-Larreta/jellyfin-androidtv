@@ -26,6 +26,18 @@ import org.koin.compose.koinInject
 fun SettingsScreensaverAgeRatingScreen() {
 	val router = LocalRouter.current
 	val userPreferences = koinInject<UserPreferences>()
+
+	ScreensaverAgeRatingSelection(
+		userPreferences = userPreferences,
+		onSelectionComplete = router::back,
+	)
+}
+
+@Composable
+internal fun ScreensaverAgeRatingSelection(
+	userPreferences: UserPreferences,
+	onSelectionComplete: () -> Unit,
+) {
 	val selectedAgeRating = remember { userPreferences.readScreensaverAgeRatingMax() }
 	val options = getScreensaverAgeRatingOptions()
 	LaunchedEffect(Unit) {
@@ -46,7 +58,7 @@ fun SettingsScreensaverAgeRatingScreen() {
 				selected = selectedAgeRating == ageRating,
 				onClick = {
 					userPreferences[UserPreferences.screensaverAgeRatingMax] = ageRating
-					router.back()
+					onSelectionComplete()
 				}
 			)
 		}
