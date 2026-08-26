@@ -80,13 +80,11 @@ fun UserCard(
 ) {
 	val focused by interactionSource.collectIsFocusedAsState()
 
-	// Mix button background with input foreground because we display text beneath the profile picture on a transparent background similar
-	// to the input text
 	val color = when {
 		focused -> (focusedBorderColor ?: JellyfinTheme.colorScheme.buttonFocused) to
-			(focusedTextColor ?: JellyfinTheme.colorScheme.onInputFocused)
+			(focusedTextColor ?: JellyfinTheme.colorScheme.onBackground)
 		else -> (unfocusedBorderColor ?: JellyfinTheme.colorScheme.button) to
-			(unfocusedTextColor ?: JellyfinTheme.colorScheme.onInput)
+			(unfocusedTextColor ?: JellyfinTheme.colorScheme.onBackground)
 	}
 	val scale by animateFloatAsState(if (focused) 1.1f else 1f, label = "UserCardFocusScale")
 

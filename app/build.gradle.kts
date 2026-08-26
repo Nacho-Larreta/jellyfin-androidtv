@@ -207,5 +207,7 @@ dependencies {
 	testImplementation(libs.kotest.assertions)
 	testImplementation(libs.mockk)
 	testImplementation(libs.robolectric)
+	testImplementation(libs.androidx.compose.ui.test.junit4)
+	debugImplementation(libs.androidx.compose.ui.test.manifest)
 	testRuntimeOnly(libs.junit5.vintage.engine)
 }

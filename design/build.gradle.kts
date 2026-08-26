@@ -17,5 +17,7 @@ android {
 }
 
 dependencies {
+	implementation(libs.androidx.compose.animation.core)
 	implementation(libs.androidx.compose.ui.graphics)
+	implementation(libs.androidx.compose.ui.text)
 }
